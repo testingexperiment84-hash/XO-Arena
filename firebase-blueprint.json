@@ -1,0 +1,25 @@
+{
+  "entities": {
+    "Game": {
+      "title": "Game",
+      "description": "A completed Tic Tac Toe game record.",
+      "type": "object",
+      "properties": {
+        "player1Name": { "type": "string" },
+        "player2Name": { "type": "string" },
+        "winner": { "type": "string" },
+        "mode": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["player1Name", "player2Name", "winner", "mode", "userId"]
+    }
+  },
+  "firestore": {
+    "/games/{gameId}": {
+      "schema": { "$ref": "#/entities/Game" },
+      "description": "Stores completed game results."
+    }
+  }
+}

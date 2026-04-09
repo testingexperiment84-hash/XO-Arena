@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    function isValidGame(data) {
+      return data.keys().hasAll(['player1Name', 'player2Name', 'winner', 'mode', 'userId']) &&
+             data.player1Name is string &&
+             data.player2Name is string &&
+             data.winner is string &&
+             data.mode is string &&
+             data.userId is string;
+    }
+
+    match /games/{gameId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(request.resource.data.userId) && isValidGame(request.resource.data);
+      allow update: if false; // Games are immutable
+      allow delete: if false;
+    }
+  }
+}

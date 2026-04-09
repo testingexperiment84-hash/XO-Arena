@@ -1,0 +1,5 @@
+{
+  "name": "XO Arena",
+  "description": "A brutalist 3D Tic Tac Toe game with custom icons, AI, and a leaderboard.",
+  "requestFramePermissions": []
+}

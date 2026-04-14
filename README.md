@@ -182,5 +182,5 @@ MIT — feel free to fork, modify, and ship your own version.
 <div align="center">
   Made with React, Firebase, and a healthy competitive spirit.
 </div>
-LIVE AT - https://xoarenaa.netlify.app/
-          https://xo-arena-beige.vercel.app/
+LIVE AT - https://xoarenaa.netlify.app/ <br>
+          <br>https://xo-arena-beige.vercel.app/<br>

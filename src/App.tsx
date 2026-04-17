@@ -7,21 +7,23 @@ import {
   Eraser, Shield, Zap, Undo, Moon, Sun, Monitor
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
+import { getAnalytics } from 'firebase/analytics';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp, getDocs, query, orderBy, limit } from 'firebase/firestore';
 // --- Firebase Setup ---
 const firebaseConfig = {
-  projectId: "ai-studio-applet-webapp-64f98",
-  appId: "1:1003378525409:web:2b77945678002dedfc63a0",
   apiKey: "AIzaSyCUZGhcnWjhP3WNV9DVhj19rmiyY0gG_V4",
   authDomain: "ai-studio-applet-webapp-64f98.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-7bdd13ae-3860-4025-8d70-1043604614f9",
+  projectId: "ai-studio-applet-webapp-64f98",
   storageBucket: "ai-studio-applet-webapp-64f98.firebasestorage.app",
   messagingSenderId: "1003378525409",
-  measurementId: ""
+  appId: "1:1003378525409:web:2b77945678002dedfc63a0",
+  measurementId: "G-GV2C5LRVNM",
+  firestoreDatabaseId: "ai-studio-7bdd13ae-3860-4025-8d70-1043604614f9"
 };
 
 const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 const auth = getAuth();
 
@@ -128,6 +130,20 @@ export default function App() {
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
   const [lbFilterMode, setLbFilterMode] = useState<'ALL' | 'AI' | '2P'>('ALL');
   const [lbFilterGrid, setLbFilterGrid] = useState<'ALL' | 3 | 4 | 5>('ALL');
+
+  const updatePlayerIcon = (playerNum: 1 | 2, icon: string) => {
+    if (playerNum === 1) {
+      if (player2.icon === icon && player2.iconType === 'lucide') {
+        setPlayer2({ ...player2, icon: player1.icon });
+      }
+      setPlayer1({ ...player1, iconType: 'lucide', icon });
+    } else {
+      if (player1.icon === icon && player1.iconType === 'lucide') {
+        setPlayer1({ ...player1, icon: player2.icon });
+      }
+      setPlayer2({ ...player2, iconType: 'lucide', icon });
+    }
+  };
 
   const board = history[stepNumber];
   const winInfo = checkWinner(board, gridSize, winLength);
@@ -245,17 +261,70 @@ export default function App() {
       return checkWinner(b, gridSize, winLength) !== null;
     };
 
+    // 1. Immediate Win
     for (let move of available) if (wins(move, aiMark)) return move;
+
+    // 2. Immediate Block
     if (difficulty !== 'EASY') {
       for (let move of available) if (wins(move, pMark)) return move;
     }
+
+    // 3. Minimax for HARD
     if (difficulty === 'HARD') {
-      const center = Math.floor((gridSize * gridSize) / 2);
-      if (available.includes(center)) return center;
-      const corners = [0, gridSize - 1, gridSize * (gridSize - 1), gridSize * gridSize - 1];
-      const availCorners = corners.filter(c => available.includes(c));
-      if (availCorners.length > 0) return availCorners[Math.floor(Math.random() * availCorners.length)];
+      const maxDepth = gridSize === 3 ? 9 : 3;
+
+      const minimax = (b: BoardState, depth: number, isMaximizing: boolean, alpha: number, beta: number): number => {
+        const winCheck = checkWinner(b, gridSize, winLength);
+        if (winCheck?.winner === aiMark) return 100 - depth;
+        if (winCheck?.winner === pMark) return -100 + depth;
+
+        const empties = b.map((v, i) => v === null ? i : null).filter(v => v !== null) as number[];
+        if (empties.length === 0 || depth >= maxDepth) return 0;
+
+        if (isMaximizing) {
+          let maxEval = -Infinity;
+          for (let move of empties) {
+            b[move] = aiMark;
+            const ev = minimax(b, depth + 1, false, alpha, beta);
+            b[move] = null;
+            maxEval = Math.max(maxEval, ev);
+            alpha = Math.max(alpha, ev);
+            if (beta <= alpha) break;
+          }
+          return maxEval;
+        } else {
+          let minEval = Infinity;
+          for (let move of empties) {
+            b[move] = pMark;
+            const ev = minimax(b, depth + 1, true, alpha, beta);
+            b[move] = null;
+            minEval = Math.min(minEval, ev);
+            beta = Math.min(beta, ev);
+            if (beta <= alpha) break;
+          }
+          return minEval;
+        }
+      };
+
+      let bestScore = -Infinity;
+      let bestMove = available[0];
+
+      if (available.length === gridSize * gridSize) return Math.floor((gridSize * gridSize) / 2);
+
+      const bCopy = [...currentBoard];
+      for (let move of available) {
+        bCopy[move] = aiMark;
+        const score = minimax(bCopy, 0, false, -Infinity, Infinity);
+        bCopy[move] = null;
+        if (score > bestScore) {
+          bestScore = score;
+          bestMove = move;
+        }
+      }
+      return bestMove;
     }
+
+    // 4. Random fallback for EASY / early moves
     return available[Math.floor(Math.random() * available.length)];
   };
 
@@ -321,16 +390,12 @@ export default function App() {
     else setP2PowerUps(p => ({ ...p, [type]: p[type] - 1 }));
   };
 
-  const undoMove = () => {
-    if (stepNumber > 0) {
-      const stepsToUndo = mode === 'AI' ? 2 : 1;
-      const newStep = Math.max(0, stepNumber - stepsToUndo);
-      setStepNumber(newStep);
-      setXIsNext(newStep % 2 === 0);
-      setTimeLeft(10);
-      setActivePowerUp(null);
-      setIsDoubleMove(false);
-    }
+  const jumpTo = (step: number) => {
+    setStepNumber(step);
+    setXIsNext(step % 2 === 0);
+    setTimeLeft(10);
+    setActivePowerUp(null);
+    setIsDoubleMove(false);
   };
 
   const resetGame = () => {
@@ -565,12 +630,34 @@ export default function App() {
           </div>
 
           <div className="flex gap-4 mt-8 w-full max-w-[500px]">
-            <button onClick={undoMove} disabled={stepNumber === 0 || !!winner || isDraw} className="flex-1 modern-card py-4 rounded-2xl font-medium flex items-center justify-center gap-2 hover:bg-white/[0.06] transition disabled:opacity-30">
+            <button onClick={() => jumpTo(Math.max(0, stepNumber - (mode === 'AI' ? 2 : 1)))} disabled={stepNumber === 0 || !!winner || isDraw} className="flex-1 modern-card py-4 rounded-2xl font-medium flex items-center justify-center gap-2 hover:bg-white/[0.06] transition disabled:opacity-30">
               <Undo className="w-5 h-5" /> Undo
             </button>
             <button onClick={resetGame} className="flex-1 modern-card py-4 rounded-2xl font-medium flex items-center justify-center gap-2 hover:bg-white/[0.06] transition">
               <RotateCcw className="w-5 h-5" /> Play Again
             </button>
+          </div>
+
+          {/* Time Travel History Visualizer */}
+          <div className="w-full max-w-[500px] mt-6 modern-card p-5 rounded-[2rem] shadow-xl">
+            <h3 className="text-xs font-semibold tracking-widest text-gray-400 uppercase mb-4 flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-sky-400" /> Time Travel
+            </h3>
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide snap-x">
+              {history.map((_, step) => (
+                <button 
+                  key={step}
+                  onClick={() => jumpTo(step)}
+                  className={`shrink-0 px-5 py-2.5 rounded-xl text-sm font-medium transition-all snap-center ${
+                    stepNumber === step 
+                      ? 'bg-sky-500 text-white shadow-md shadow-sky-500/20 scale-105'
+                      : 'bg-white/5 hover:bg-white/10 text-gray-400'
+                  }`}
+                >
+                  {step === 0 ? 'Start' : `Move ${step}`}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -637,7 +724,7 @@ export default function App() {
                       <input type="color" value={player1.color} onChange={e => setPlayer1({...player1, color: e.target.value})} className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
                       <div className="flex-1 flex gap-1 overflow-x-auto pb-2 scrollbar-hide">
                         {Object.keys(ICONS).slice(0, 5).map(icon => (
-                          <button key={icon} onClick={() => setPlayer1({...player1, iconType: 'lucide', icon})} className={`p-2 rounded-lg shrink-0 ${player1.icon === icon && player1.iconType === 'lucide' ? 'bg-white/20' : 'bg-white/5 hover:bg-white/10'}`}>
+                          <button key={icon} onClick={() => updatePlayerIcon(1, icon)} className={`p-2 rounded-lg shrink-0 ${player1.icon === icon && player1.iconType === 'lucide' ? 'bg-white/20' : 'bg-white/5 hover:bg-white/10'}`}>
                             {React.createElement(ICONS[icon], { className: "w-5 h-5" })}
                           </button>
                         ))}
@@ -658,7 +745,7 @@ export default function App() {
                       <input type="color" value={player2.color} onChange={e => setPlayer2({...player2, color: e.target.value})} className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
                       <div className="flex-1 flex gap-1 overflow-x-auto pb-2 scrollbar-hide">
                         {Object.keys(ICONS).slice(0, 5).map(icon => (
-                          <button key={icon} onClick={() => setPlayer2({...player2, iconType: 'lucide', icon})} className={`p-2 rounded-lg shrink-0 ${player2.icon === icon && player2.iconType === 'lucide' ? 'bg-white/20' : 'bg-white/5 hover:bg-white/10'}`}>
+                          <button key={icon} onClick={() => updatePlayerIcon(2, icon)} className={`p-2 rounded-lg shrink-0 ${player2.icon === icon && player2.iconType === 'lucide' ? 'bg-white/20' : 'bg-white/5 hover:bg-white/10'}`}>
                             {React.createElement(ICONS[icon], { className: "w-5 h-5" })}
                           </button>
                         ))}

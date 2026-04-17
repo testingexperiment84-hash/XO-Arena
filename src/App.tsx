@@ -115,8 +115,10 @@ export default function App() {
   const [isTimerMode, setIsTimerMode] = useState(false);
   const [timeLeft, setTimeLeft] = useState(10);
   
-  const [p1PowerUps, setP1PowerUps] = useState<PowerUps>({ remove: 1, block: 1, double: 1 });
-  const [p2PowerUps, setP2PowerUps] = useState<PowerUps>({ remove: 1, block: 1, double: 1 });
+  const [p1PowerUps, setP1PowerUps] = useState<PowerUps>({ remove: 3, block: 3, double: 2 });
+  const [p2PowerUps, setP2PowerUps] = useState<PowerUps>({ remove: 3, block: 3, double: 2 });
+  const [p1Cooldowns, setP1Cooldowns] = useState<PowerUps>({ remove: 0, block: 0, double: 0 });
+  const [p2Cooldowns, setP2Cooldowns] = useState<PowerUps>({ remove: 0, block: 0, double: 0 });
   const [activePowerUp, setActivePowerUp] = useState<keyof PowerUps | null>(null);
   const [isDoubleMove, setIsDoubleMove] = useState(false);
 
@@ -152,6 +154,7 @@ export default function App() {
   const isDraw = !winner && board.every(cell => cell !== null);
   const currentPlayer = xIsNext ? player1 : player2;
   const currentPowerUps = xIsNext ? p1PowerUps : p2PowerUps;
+  const currentCooldowns = xIsNext ? p1Cooldowns : p2Cooldowns;
 
   // --- Audio ---
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -378,6 +381,11 @@ export default function App() {
     setHistory([...newHistory, newBoard]);
     setStepNumber(newHistory.length);
     if (switchTurn) {
+      if (xIsNext) {
+        setP1Cooldowns(c => ({ remove: Math.max(0, c.remove - 1), block: Math.max(0, c.block - 1), double: Math.max(0, c.double - 1) }));
+      } else {
+        setP2Cooldowns(c => ({ remove: Math.max(0, c.remove - 1), block: Math.max(0, c.block - 1), double: Math.max(0, c.double - 1) }));
+      }
       setXIsNext(!xIsNext);
       setTimeLeft(10);
     }
@@ -386,8 +394,14 @@ export default function App() {
 
   const consumePowerUp = (type: keyof PowerUps) => {
     playSound('powerup');
-    if (xIsNext) setP1PowerUps(p => ({ ...p, [type]: p[type] - 1 }));
-    else setP2PowerUps(p => ({ ...p, [type]: p[type] - 1 }));
+    const COOLDOWNS = { remove: 3, block: 3, double: 4 };
+    if (xIsNext) {
+      setP1PowerUps(p => ({ ...p, [type]: p[type] - 1 }));
+      setP1Cooldowns(c => ({ ...c, [type]: COOLDOWNS[type] }));
+    } else {
+      setP2PowerUps(p => ({ ...p, [type]: p[type] - 1 }));
+      setP2Cooldowns(c => ({ ...c, [type]: COOLDOWNS[type] }));
+    }
   };
 
   const jumpTo = (step: number) => {
@@ -405,8 +419,10 @@ export default function App() {
     setTimeLeft(10);
     setActivePowerUp(null);
     setIsDoubleMove(false);
-    setP1PowerUps({ remove: 1, block: 1, double: 1 });
-    setP2PowerUps({ remove: 1, block: 1, double: 1 });
+    setP1PowerUps({ remove: 3, block: 3, double: 2 });
+    setP2PowerUps({ remove: 3, block: 3, double: 2 });
+    setP1Cooldowns({ remove: 0, block: 0, double: 0 });
+    setP2Cooldowns({ remove: 0, block: 0, double: 0 });
   };
 
   const changeGridSize = (size: number) => {
@@ -496,10 +512,13 @@ export default function App() {
         </h1>
         <div className="w-px h-6 bg-white/10"></div>
         <div className="flex gap-2">
-          <button onClick={() => { setShowLeaderboard(true); fetchLeaderboard(); }} className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
+          <button onClick={resetGame} title="Restart Game" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
+            <RotateCcw className="w-5 h-5" />
+          </button>
+          <button onClick={() => { setShowLeaderboard(true); fetchLeaderboard(); }} title="Leaderboard" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
             <Trophy className="w-5 h-5" />
           </button>
-          <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
+          <button onClick={() => setShowSettings(true)} title="Settings" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
             <Settings className="w-5 h-5" />
           </button>
         </div>
@@ -549,23 +568,36 @@ export default function App() {
             <h2 className="text-sm font-medium mb-4 tracking-widest text-gray-400 uppercase text-center">Power-Ups</h2>
             <div className="grid grid-cols-3 gap-3">
               {[
-                { id: 'remove', icon: Eraser, label: 'Remove', count: currentPowerUps.remove },
-                { id: 'block', icon: Shield, label: 'Block', count: currentPowerUps.block },
-                { id: 'double', icon: Zap, label: '2x Move', count: currentPowerUps.double },
-              ].map(p => (
-                <button
-                  key={p.id}
-                  disabled={p.count === 0 || winner !== undefined || isDraw || (mode === 'AI' && !xIsNext)}
-                  onClick={() => setActivePowerUp(activePowerUp === p.id ? null : p.id as keyof PowerUps)}
-                  className={`flex flex-col items-center justify-center p-4 rounded-2xl transition-all duration-200 ${
-                    activePowerUp === p.id ? 'bg-white/10 ring-1 ring-white/30 shadow-lg' : 'bg-white/[0.02] hover:bg-white/[0.06] border border-white/5'
-                  } ${p.count === 0 ? 'opacity-30 cursor-not-allowed' : ''}`}
-                >
-                  <p.icon className="w-6 h-6 mb-2 text-gray-300" />
-                  <span className="text-xs font-medium text-gray-400">{p.label}</span>
-                  <div className="mt-2 text-xs font-bold bg-white/10 px-2 py-0.5 rounded-full">{p.count}</div>
-                </button>
-              ))}
+                { id: 'remove', icon: Eraser, label: 'Remove', count: currentPowerUps.remove, cd: currentCooldowns.remove },
+                { id: 'block', icon: Shield, label: 'Block', count: currentPowerUps.block, cd: currentCooldowns.block },
+                { id: 'double', icon: Zap, label: '2x Move', count: currentPowerUps.double, cd: currentCooldowns.double },
+              ].map(p => {
+                const isCooldown = p.cd > 0;
+                const isDisabled = p.count === 0 || isCooldown || winner !== undefined || isDraw || (mode === 'AI' && !xIsNext);
+                return (
+                  <button
+                    key={p.id}
+                    disabled={isDisabled}
+                    onClick={() => setActivePowerUp(activePowerUp === p.id ? null : p.id as keyof PowerUps)}
+                    className={`relative flex flex-col items-center justify-center p-4 rounded-2xl transition-all duration-200 overflow-hidden ${
+                      activePowerUp === p.id ? 'bg-white/10 ring-1 ring-white/30 shadow-lg' : 'bg-white/[0.02] hover:bg-white/[0.06] border border-white/5'
+                    } ${isDisabled && !isCooldown ? 'opacity-30 cursor-not-allowed' : ''}`}
+                  >
+                    <p.icon className={`w-6 h-6 mb-2 ${isCooldown ? 'text-gray-500' : 'text-gray-300'}`} />
+                    <span className="text-xs font-medium text-gray-400">{p.label}</span>
+                    <div className="mt-2 text-xs font-bold leading-none bg-white/10 px-2 py-1 rounded-full">{p.count} left</div>
+
+                    <AnimatePresence>
+                      {isCooldown && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-10 border border-amber-500/30">
+                          <span className="text-3xl font-black text-amber-400 mb-0.5">{p.cd}</span>
+                          <span className="text-[9px] uppercase tracking-widest font-bold text-amber-400/80">Turns</span>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </button>
+                );
+              })}
             </div>
             <div className="h-8 mt-4 flex items-center justify-center">
               <AnimatePresence mode="wait">

@@ -1,184 +1,86 @@
-# ✕ XO Arena
+# 🎮 XO Arena
 
-> A polished, feature-rich Tic Tac Toe experience built with React, TypeScript, and Firebase.
+![React](https://img.shields.io/badge/react-%2320232a.svg?style=for-the-badge&logo=react&logoColor=%2361DAFB)
+![Vite](https://img.shields.io/badge/vite-%23646CFF.svg?style=for-the-badge&logo=vite&logoColor=white)
+![TailwindCSS](https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=for-the-badge&logo=tailwind-css&logoColor=white)
+![Firebase](https://img.shields.io/badge/firebase-%23039BE5.svg?style=for-the-badge&logo=firebase)
 
-XO Arena takes the classic game to the next level — variable grid sizes, strategic power-ups, an AI opponent, a global leaderboard, full player customization, and four distinct visual themes. Whether you're playing solo or challenging a friend, every match feels fresh.
-
----
-
-## ✨ Features
-
-### 🎮 Gameplay
-- **Three grid sizes** — 3×3, 4×4, or 5×5 boards with win-length scaling automatically
-- **Two game modes** — Play against the AI or go head-to-head with a local friend (2-Player)
-- **AI difficulty levels** — Easy, Medium, and Hard (center/corner strategy + win/block logic)
-- **Timer mode** — Optional 10-second per-turn countdown to keep things tense
-- **Undo** — Step back your last move (or last two in AI mode)
-- **Move history** — Full game state tracked across every turn
-
-### ⚡ Power-Ups
-Each player starts with one of each power-up per game:
-
-| Power-Up | Effect |
-|---|---|
-| 🧹 **Remove** | Erase one of your opponent's placed marks |
-| 🛡️ **Block** | Place an impassable shield tile on any empty cell |
-| ⚡ **Double Move** | Place two marks in a single turn |
-
-### 🎨 Customization
-- **Player names** — Rename both players freely
-- **Player colors** — Full color picker for each player's mark color
-- **Icons** — Choose from 10 built-in Lucide icons (X, Circle, Star, Ghost, Crown, and more)
-- **Custom avatars** — Upload any image file to use as your player icon
-- **4 visual themes** — `modern`, `neon`, `brutalist`, `minimalist`
-
-### 🏆 Leaderboard
-- Google Sign-In via Firebase Auth
-- Win scores are saved to Firestore automatically after each victory
-- Filterable by game mode (vs AI / 2 Player) and grid size (3×3, 4×4, 5×5)
-- Top 10 global rankings displayed in-app
-
-### 🔊 Polish
-- Synthesized sound effects via the Web Audio API (place, power-up, win)
-- Confetti burst on victory (`canvas-confetti`)
-- Smooth animations throughout powered by `motion/react`
-- Winning cells highlighted with a glowing ring
+**XO Arena** is a modern, production-ready, advanced Tic Tac Toe web game. It takes the classic game and elevates it with dynamic grids, power-ups, AI opponents, deep customization, and a global leaderboard.
 
 ---
 
-## 🛠️ Tech Stack
+## 🌍 Deployment Guide (Vercel & Netlify)
 
-| Layer | Technology |
-|---|---|
-| UI Framework | React 19 + TypeScript |
-| Build Tool | Vite 6 |
-| Styling | Tailwind CSS v4 |
-| Animations | Motion (Framer Motion) |
-| Icons | Lucide React |
-| Auth & Database | Firebase v12 (Auth + Firestore) |
-| Deployment | Vercel / Netlify |
+This project is already perfectly configured for seamless deployment to modern hosting platforms. The necessary configuration files (`vercel.json` and `netlify.toml`) are already included in the root directory to handle Single Page Application (SPA) routing.
 
----
+### Step 1: Push to GitHub
 
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js 18+
-- A [Firebase](https://console.firebase.google.com/) project with **Authentication** (Google provider) and **Firestore** enabled
-
-### 1. Clone the repo
+Before deploying, you need to push your code to a GitHub repository. Open your terminal in the project folder and run these commands:
 
 ```bash
-git clone https://github.com/your-username/xo-arena.git
-cd xo-arena
+# 1. Initialize a new Git repository
+git init
+
+# 2. Add all your files to the staging area
+git add .
+
+# 3. Commit the files
+git commit -m "Initial commit: Ready for deployment"
+
+# 4. Create a new repository on GitHub (leave it empty, no README/license)
+# 5. Link your local repository to GitHub (replace URL with your actual repo URL)
+git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+
+# 6. Push your code to GitHub
+git branch -M main
+git push -u origin main
 ```
 
-### 2. Install dependencies
+### Step 2: Deploy to Vercel (Option A)
 
-```bash
-npm install
-```
+Vercel is highly optimized for Vite and React applications.
 
-### 3. Configure Firebase
+1. Go to [Vercel.com](https://vercel.com/) and sign in with your GitHub account.
+2. Click **Add New...** > **Project**.
+3. Find your newly created GitHub repository in the list and click **Import**.
+4. Vercel will automatically detect that it's a **Vite** project.
+5. The build settings are automatically configured:
+   * **Build Command:** `npm run build`
+   * **Output Directory:** `dist`
+6. Click **Deploy**.
+7. *Note: The `vercel.json` file included in this project automatically handles page routing so your app works perfectly.*
 
-Copy the example env file and fill in your Firebase project credentials:
+### Step 3: Deploy to Netlify (Option B)
 
-```bash
-cp .env.example .env
-```
+Netlify is another excellent, free hosting platform for React apps.
 
-Then update `firebase-applet-config.json` with your Firebase project's config object (available in your Firebase Console under **Project Settings → Your apps**):
-
-```json
-{
-  "apiKey": "YOUR_API_KEY",
-  "authDomain": "YOUR_PROJECT.firebaseapp.com",
-  "projectId": "YOUR_PROJECT_ID",
-  "storageBucket": "YOUR_PROJECT.appspot.com",
-  "messagingSenderId": "YOUR_SENDER_ID",
-  "appId": "YOUR_APP_ID",
-  "firestoreDatabaseId": "(default)"
-}
-```
-
-### 4. Set up Firestore Rules
-
-Deploy the included security rules to your Firebase project:
-
-```bash
-firebase deploy --only firestore:rules
-```
-
-Or paste the contents of `firestore.rules` directly in the Firebase Console under **Firestore → Rules**.
-
-### 5. Run locally
-
-```bash
-npm run dev
-```
-
-The app will be available at `http://localhost:3000`.
+1. Go to [Netlify.com](https://www.netlify.com/) and sign in with your GitHub account.
+2. Click **Add new site** > **Import an existing project**.
+3. Choose **GitHub** and authorize Netlify if prompted.
+4. Select your repository from the list.
+5. Netlify will automatically read the `netlify.toml` file included in this project, which sets up the build command (`npm run build`), the publish directory (`dist`), and the routing redirects.
+6. Click **Deploy site**.
 
 ---
 
-## 📦 Build & Deploy
+## 🛠️ Local Development
 
-### Build for production
+To run this project locally on your own computer:
 
-```bash
-npm run build
-```
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-### Deploy to Vercel
+2. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new)
-
-The `vercel.json` config is already included — just connect your repo and deploy.
-
-### Deploy to Netlify
-
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start)
-
-The `netlify.toml` config is already included. Connect your repo and Netlify handles the rest.
-
----
-
-## 📁 Project Structure
-
-```
-xo-arena/
-├── src/
-│   ├── App.tsx          # Main game component (all game logic, UI, modals)
-│   ├── main.tsx         # React entry point
-│   └── index.css        # Global styles & theme definitions
-├── firebase-applet-config.json   # Firebase project configuration
-├── firebase-blueprint.json       # Firestore data schema reference
-├── firestore.rules               # Firestore security rules
-├── index.html
-├── vite.config.ts
-├── tsconfig.json
-├── vercel.json
-└── netlify.toml
-```
+3. **Build for production:**
+   ```bash
+   npm run build
+   ```
 
 ---
-
-## 🗺️ Roadmap
-
-- [ ] Online multiplayer (real-time with Firestore)
-- [ ] More grid sizes (6×6, 7×7)
-- [ ] Animated theme transitions
-- [ ] Match replay viewer
-- [ ] Mobile PWA support
-
----
-
-## 📄 License
-
-MIT — feel free to fork, modify, and ship your own version.
-
----
-
-<div align="center">
-  Made with React, Firebase, and a healthy competitive spirit.
-</div>
+*Built with ❤️ for the modern web.*

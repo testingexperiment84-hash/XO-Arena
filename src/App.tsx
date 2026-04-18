@@ -4,28 +4,34 @@ import confetti from 'canvas-confetti';
 import {
   Settings, Trophy, RotateCcw, LogIn, LogOut, X, Circle,
   Triangle, Square, Star, Heart, Ghost, Skull, Crown, Rocket,
-  Eraser, Shield, Zap, Undo, Moon, Sun, Monitor
+  Eraser, Shield, Zap, Undo, Moon, Sun, Monitor, User as UserIcon, Check, History, Flame
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, collection, addDoc, serverTimestamp, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User, updateProfile } from 'firebase/auth';
+import { getFirestore, collection, addDoc, serverTimestamp, getDocs, query, orderBy, limit, where, doc, setDoc, updateDoc, onSnapshot, getDoc } from 'firebase/firestore';
+import firebaseConfigJson from '../firebase-applet-config.json'
+
 // --- Firebase Setup ---
+// In AI Studio, firebase-applet-config.json provides the credentials.
+// For GitHub or Vercel builds, you can provide these as VITE_ environment variables.
 const firebaseConfig = {
-  apiKey: "AIzaSyCUZGhcnWjhP3WNV9DVhj19rmiyY0gG_V4",
-  authDomain: "ai-studio-applet-webapp-64f98.firebaseapp.com",
-  projectId: "ai-studio-applet-webapp-64f98",
-  storageBucket: "ai-studio-applet-webapp-64f98.firebasestorage.app",
-  messagingSenderId: "1003378525409",
-  appId: "1:1003378525409:web:2b77945678002dedfc63a0",
-  measurementId: "G-GV2C5LRVNM",
-  firestoreDatabaseId: "ai-studio-7bdd13ae-3860-4025-8d70-1043604614f9"
+  apiKey: firebaseConfigJson?.apiKey || import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: firebaseConfigJson?.authDomain || import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: firebaseConfigJson?.projectId || import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: firebaseConfigJson?.storageBucket || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: firebaseConfigJson?.messagingSenderId || import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: firebaseConfigJson?.appId || import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: firebaseConfigJson?.measurementId || import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  firestoreDatabaseId: firebaseConfigJson?.firestoreDatabaseId || import.meta.env.VITE_FIRESTORE_DATABASE_ID
 };
 
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-const auth = getAuth();
+const isFirebaseConfigured = !!firebaseConfig.projectId;
+
+const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
+const analytics = isFirebaseConfigured ? getAnalytics(app!) : null;
+const db = isFirebaseConfigured ? getFirestore(app!, firebaseConfig.firestoreDatabaseId) : null;
+const auth = isFirebaseConfigured ? getAuth(app!) : null;
 
 // --- Types ---
 type Player = { name: string; icon: string; iconType?: 'lucide' | 'custom'; iconUrl?: string; color: string; mark: string };
@@ -105,7 +111,11 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>('modern');
   const [gridSize, setGridSize] = useState<number>(3);
   const [winLength, setWinLength] = useState<number>(3);
-  const [mode, setMode] = useState<'2P' | 'AI'>('AI');
+  const [mode, setMode] = useState<'2P' | 'AI' | 'ONLINE'>('AI');
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [isHost, setIsHost] = useState(false);
+  const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [onlineStatus, setOnlineStatus] = useState<'waiting' | 'playing' | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>('MEDIUM');
   
   const [history, setHistory] = useState<BoardState[]>([Array(9).fill(null)]);
@@ -125,13 +135,19 @@ export default function App() {
   const [player1, setPlayer1] = useState<Player>({ name: 'Player 1', icon: 'X', iconType: 'lucide', color: '#38bdf8', mark: 'P1' });
   const [player2, setPlayer2] = useState<Player>({ name: 'Player 2', icon: 'Circle', iconType: 'lucide', color: '#fb7185', mark: 'P2' });
   
-  const [scores, setScores] = useState({ p1: 0, p2: 0, streak: 0 });
+  const [scores, setScores] = useState({ p1: 0, p2: 0, currentStreakHolder: null as 'P1' | 'P2' | null, streakCount: 0 });
   const [showSettings, setShowSettings] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [gameHistory, setGameHistory] = useState<any[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
+  const [userStats, setUserStats] = useState({ wins: 0, draws: 0, total: 0 });
   const [lbFilterMode, setLbFilterMode] = useState<'ALL' | 'AI' | '2P'>('ALL');
   const [lbFilterGrid, setLbFilterGrid] = useState<'ALL' | 3 | 4 | 5>('ALL');
+  const [isAiThinking, setIsAiThinking] = useState(false);
+  const [aiProgress, setAiProgress] = useState(0);
 
   const updatePlayerIcon = (playerNum: 1 | 2, icon: string) => {
     if (playerNum === 1) {
@@ -192,6 +208,14 @@ export default function App() {
       gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.5);
       osc.start();
       osc.stop(ctx.currentTime + 0.5);
+    } else if (type === 'draw') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.5);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.5);
     }
   };
 
@@ -201,12 +225,52 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      if (currentUser) setPlayer1(p => ({ ...p, name: currentUser.displayName || 'Player 1' }));
+      if (currentUser) {
+        setPlayer1(p => ({ ...p, name: currentUser.displayName || 'Player 1' }));
+        fetchUserStats(currentUser.uid);
+      }
     });
     return () => unsubscribe();
   }, []);
+
+  const fetchUserStats = async (uid: string) => {
+    if (!db) return;
+    try {
+      const q = query(collection(db, 'leaderboard')); // we will just fetch all and filter client side for simplicity given small size, or orderBy.
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => doc.data());
+      const userGames = data.filter(d => d.userId === uid);
+      setUserStats({
+        wins: userGames.length,
+        draws: 0,
+        total: userGames.length
+      });
+    } catch (e) {
+      console.error("Error fetching stats:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (mode !== 'ONLINE' || !roomId || !db) return;
+    const unsub = onSnapshot(doc(db, 'games', roomId), (docSnap) => {
+      if (docSnap.exists() && !docSnap.metadata.hasPendingWrites) {
+        const data = docSnap.data();
+        if (data.status === 'playing' && onlineStatus === 'waiting') {
+           setOnlineStatus('playing');
+        }
+        if (data.stateStr) {
+           const remoteState = JSON.parse(data.stateStr);
+           setHistory(remoteState.history);
+           setStepNumber(remoteState.stepNumber);
+           setXIsNext(remoteState.xIsNext);
+        }
+      }
+    });
+    return () => unsub();
+  }, [mode, roomId, onlineStatus]);
 
   useEffect(() => {
     if (winner && winner !== 'BLOCK') {
@@ -214,16 +278,21 @@ export default function App() {
       confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: [player1.color, player2.color] });
       setScores(s => {
         const isP1 = winner === player1.mark;
+        const streakHolder = isP1 ? 'P1' as const : 'P2' as const;
+        const sameHolder = s.currentStreakHolder === streakHolder;
         return {
           p1: isP1 ? s.p1 + 1 : s.p1,
           p2: !isP1 ? s.p2 + 1 : s.p2,
-          streak: isP1 ? s.streak + 1 : 0
+          currentStreakHolder: streakHolder,
+          streakCount: sameHolder ? s.streakCount + 1 : 1
         };
       });
       if (user && winner === player1.mark) saveWinToLeaderboard();
+      if (user) saveToHistory(winner === player1.mark ? 'Win' : 'Loss');
     } else if (isDraw) {
       playSound('draw');
-      setScores(s => ({ ...s, streak: 0 }));
+      setScores(s => ({ ...s, currentStreakHolder: null, streakCount: 0 }));
+      if (user) saveToHistory('Draw');
     }
   }, [winner, isDraw]);
 
@@ -245,11 +314,23 @@ export default function App() {
 
   useEffect(() => {
     if (mode === 'AI' && !xIsNext && !winner && !isDraw) {
+      setIsAiThinking(true);
+      setAiProgress(0);
+      
+      const interval = setInterval(() => {
+        setAiProgress(p => Math.min(p + 10, 100));
+      }, 150); // Progress bar updates over 1.5s
+
       const timer = setTimeout(() => {
         const move = getAiMove(board, player2.mark, player1.mark);
         if (move !== -1) handleCellClick(move, true);
-      }, 600);
-      return () => clearTimeout(timer);
+        setIsAiThinking(false);
+      }, 1500);
+      return () => {
+        clearInterval(interval);
+        clearTimeout(timer);
+        setIsAiThinking(false);
+      }
     }
   }, [xIsNext, board, winner, isDraw, mode]);
 
@@ -333,6 +414,11 @@ export default function App() {
 
   const handleCellClick = (index: number, isAi = false) => {
     if (winner || isDraw || (mode === 'AI' && !xIsNext && !isAi)) return;
+    if (mode === 'ONLINE') {
+      if (onlineStatus !== 'playing') return;
+      if (isHost && !xIsNext) return;
+      if (!isHost && xIsNext) return;
+    }
 
     const newBoard = [...board];
 
@@ -364,8 +450,10 @@ export default function App() {
       setIsDoubleMove(true);
       setActivePowerUp(null);
       const newHistory = history.slice(0, stepNumber + 1);
-      setHistory([...newHistory, newBoard]);
+      const appended = [...newHistory, newBoard];
+      setHistory(appended);
       setStepNumber(newHistory.length);
+      syncGameState({ stateStr: JSON.stringify({ history: appended, stepNumber: newHistory.length, xIsNext }) });
       return; // Don't switch turns
     }
 
@@ -378,18 +466,26 @@ export default function App() {
 
   const finalizeMove = (newBoard: BoardState, switchTurn = true) => {
     const newHistory = history.slice(0, stepNumber + 1);
-    setHistory([...newHistory, newBoard]);
+    const appendedHistory = [...newHistory, newBoard];
+    setHistory(appendedHistory);
     setStepNumber(newHistory.length);
+    
+    let nextTurn = xIsNext;
     if (switchTurn) {
+      nextTurn = !xIsNext;
       if (xIsNext) {
         setP1Cooldowns(c => ({ remove: Math.max(0, c.remove - 1), block: Math.max(0, c.block - 1), double: Math.max(0, c.double - 1) }));
       } else {
         setP2Cooldowns(c => ({ remove: Math.max(0, c.remove - 1), block: Math.max(0, c.block - 1), double: Math.max(0, c.double - 1) }));
       }
-      setXIsNext(!xIsNext);
+      setXIsNext(nextTurn);
       setTimeLeft(10);
     }
     setActivePowerUp(null);
+
+    syncGameState({
+      stateStr: JSON.stringify({ history: appendedHistory, stepNumber: newHistory.length, xIsNext: nextTurn })
+    });
   };
 
   const consumePowerUp = (type: keyof PowerUps) => {
@@ -423,18 +519,81 @@ export default function App() {
     setP2PowerUps({ remove: 3, block: 3, double: 2 });
     setP1Cooldowns({ remove: 0, block: 0, double: 0 });
     setP2Cooldowns({ remove: 0, block: 0, double: 0 });
+    syncGameState({ stateStr: JSON.stringify({ history: [Array(gridSize * gridSize).fill(null)], stepNumber: 0, xIsNext: true }) });
   };
 
   const changeGridSize = (size: number) => {
     setGridSize(size);
-    setWinLength(size === 3 ? 3 : 4);
+    const newWinLength = Math.min(winLength, size);
+    if (newWinLength !== winLength) setWinLength(newWinLength);
     setHistory([Array(size * size).fill(null)]);
     setStepNumber(0);
     setXIsNext(true);
   };
 
+  const changeWinLength = (len: number) => {
+    if (len <= gridSize) {
+      setWinLength(len);
+      setHistory([Array(gridSize * gridSize).fill(null)]);
+      setStepNumber(0);
+      setXIsNext(true);
+    }
+  };
+
+  const syncGameState = async (changes: any) => {
+    if (mode !== 'ONLINE' || !roomId || !db) return;
+    try { await updateDoc(doc(db, 'games', roomId), changes); } catch (e) { console.error(e) }
+  };
+
+  const createMultiplayerGame = async () => {
+    if (!user || !db) return alert("Sign in to play online!");
+    const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    try {
+      await setDoc(doc(db, 'games', newRoomId), {
+        host: { uid: user.uid, displayName: user.displayName || 'P1', mark: 'P1' },
+        guest: null,
+        gridSize,
+        winLength,
+        stateStr: JSON.stringify({ history: [Array(gridSize * gridSize).fill(null)], stepNumber: 0, xIsNext: true }),
+        status: 'waiting',
+      });
+      setRoomId(newRoomId);
+      setIsHost(true);
+      setMode('ONLINE');
+      setOnlineStatus('waiting');
+      changeGridSize(gridSize);
+    } catch (e) { console.error(e) }
+  };
+
+  const joinMultiplayerGame = async (code: string) => {
+    if (!user || !db) return alert("Sign in to play online!");
+    const roomRef = doc(db, 'games', code.toUpperCase());
+    try {
+      const snap = await getDoc(roomRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.status === 'waiting' && data.host.uid !== user.uid) {
+          await updateDoc(roomRef, {
+            guest: { uid: user.uid, displayName: user.displayName || 'P2', mark: 'P2' },
+            status: 'playing'
+          });
+          setRoomId(code.toUpperCase());
+          setIsHost(false);
+          setMode('ONLINE');
+          setOnlineStatus('playing');
+          setGridSize(data.gridSize);
+          setWinLength(data.winLength);
+          const st = JSON.parse(data.stateStr);
+          setHistory(st.history);
+          setStepNumber(st.stepNumber);
+          setXIsNext(st.xIsNext);
+        } else { alert('Room is full or you are the host.'); }
+      } else { alert('Room not found'); }
+    } catch (e) { console.error(e) }
+  };
+
   const saveWinToLeaderboard = async () => {
-    if (!user) return;
+    if (!user || !db) return;
     try {
       await addDoc(collection(db, 'leaderboard'), {
         userId: user.uid,
@@ -448,7 +607,36 @@ export default function App() {
     }
   };
 
+  const saveToHistory = async (outcome: 'Win' | 'Loss' | 'Draw') => {
+    if (!user || !db) return;
+    try {
+      await addDoc(collection(db, 'gameHistory'), {
+        userId: user.uid,
+        opponent: mode === 'AI' ? `AI (${difficulty})` : player2.name,
+        outcome,
+        gridSize,
+        timestamp: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("Error saving history:", e);
+    }
+  };
+
+  const fetchGameHistory = async () => {
+    if (!user || !db) return;
+    try {
+      const q = query(collection(db, 'gameHistory'), where('userId', '==', user.uid));
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => doc.data());
+      data.sort((a, b) => (b.timestamp?.toMillis?.() || 0) - (a.timestamp?.toMillis?.() || 0));
+      setGameHistory(data.slice(0, 50));
+    } catch (e) {
+      console.error("Error fetching history:", e);
+    }
+  };
+
   const fetchLeaderboard = async () => {
+    if (!db) return;
     try {
       const q = query(collection(db, 'leaderboard'), orderBy('timestamp', 'desc'), limit(200));
       const snapshot = await getDocs(q);
@@ -510,19 +698,66 @@ export default function App() {
         <h1 className="text-xl font-bold tracking-tight">
           XO <span className="text-sky-400">Arena</span>
         </h1>
+        {mode === 'ONLINE' && roomId && (
+          <div className="flex items-center gap-2 px-4 py-1.5 bg-white/5 rounded-full border border-white/10 hidden sm:flex">
+            <div className={`w-2 h-2 rounded-full ${onlineStatus === 'playing' ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></div>
+            <span className="text-xs font-mono font-bold tracking-widest text-white/50 w-24">ROOM {roomId}</span>
+          </div>
+        )}
         <div className="w-px h-6 bg-white/10"></div>
         <div className="flex gap-2">
-          <button onClick={resetGame} title="Restart Game" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
+          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={resetGame} title="Restart Game" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
             <RotateCcw className="w-5 h-5" />
-          </button>
-          <button onClick={() => { setShowLeaderboard(true); fetchLeaderboard(); }} title="Leaderboard" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
+          </motion.button>
+          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => { setShowLeaderboard(true); fetchLeaderboard(); }} title="Leaderboard" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
             <Trophy className="w-5 h-5" />
-          </button>
-          <button onClick={() => setShowSettings(true)} title="Settings" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
+          </motion.button>
+          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => { setShowHistory(true); fetchGameHistory(); }} title="History" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
+            <History className="w-5 h-5" />
+          </motion.button>
+          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => setShowProfile(true)} title="Profile" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
+            <UserIcon className="w-5 h-5" />
+          </motion.button>
+          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => setShowSettings(true)} title="Settings" className="p-2 hover:bg-white/10 rounded-full transition text-gray-400 hover:text-white">
             <Settings className="w-5 h-5" />
-          </button>
+          </motion.button>
         </div>
       </header>
+
+      {/* Multiplayer Lobby Overlay */}
+      <AnimatePresence>
+        {mode === 'ONLINE' && onlineStatus !== 'playing' && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-40 p-4">
+            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="modern-card bg-[#0a0a0a]/90 p-8 rounded-[2rem] w-full max-w-md border border-white/10 text-center shadow-2xl">
+              <h2 className="text-2xl font-bold mb-6 flex justify-center items-center gap-2"><Crown className="w-6 h-6 text-amber-400" /> Multiplayer Lobby</h2>
+              {onlineStatus === 'waiting' && roomId ? (
+                <div>
+                  <p className="text-gray-400 mb-2">Waiting for opponent to join...</p>
+                  <p className="text-sm font-medium">Share this code with your friend:</p>
+                  <div className="text-5xl font-mono text-sky-400 font-bold my-8 tracking-[0.2em]">{roomId}</div>
+                  <button onClick={() => { setMode('AI'); setOnlineStatus(null); setRoomId(null); }} className="text-sm text-gray-400 hover:text-rose-400 transition">Cancel and Go Back</button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={createMultiplayerGame} className="w-full bg-gradient-to-r from-sky-500 to-indigo-500 hover:from-sky-400 hover:to-indigo-400 text-white rounded-xl py-3.5 font-bold transition">
+                      Create New Room
+                    </motion.button>
+                    <div className="relative py-4 flex items-center">
+                      <div className="flex-grow border-t border-white/10"></div>
+                      <span className="shrink-0 px-4 text-xs text-gray-500 font-bold tracking-widest">OR</span>
+                      <div className="flex-grow border-t border-white/10"></div>
+                    </div>
+                    <div className="flex gap-2">
+                      <input value={joinCodeInput} onChange={e => setJoinCodeInput(e.target.value.toUpperCase())} placeholder="ENTER CODE" className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-center font-mono font-bold focus:outline-none focus:border-sky-400 tracking-widest" maxLength={6} />
+                      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => joinMultiplayerGame(joinCodeInput)} disabled={joinCodeInput.length < 5} className="bg-white/10 hover:bg-white/20 text-white px-6 rounded-xl font-bold transition disabled:opacity-30 disabled:cursor-not-allowed">Join</motion.button>
+                    </div>
+                    <button onClick={() => setMode('AI')} className="w-full text-sm text-gray-400 mt-4 hover:text-white transition">Back to Single Player</button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main Game Area */}
       <div className="mt-20 grid grid-cols-1 lg:grid-cols-12 gap-8 w-full max-w-5xl z-10">
@@ -532,15 +767,19 @@ export default function App() {
           
           {/* Current Turn */}
           <div className="modern-card p-8 rounded-3xl flex flex-col items-center justify-center relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
-            <h2 className="text-sm font-medium mb-4 tracking-widest text-gray-400 uppercase">Current Turn</h2>
-            <div className="flex items-center justify-center gap-4 text-3xl font-bold tracking-tight">
+            <div className={`absolute top-0 left-0 h-1 bg-gradient-to-r from-sky-400 to-rose-400 transition-all duration-150 ${isAiThinking ? 'opacity-100' : 'opacity-0 w-0'}`} style={{ width: `${aiProgress}%` }}></div>
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-white/20 to-transparent ${isAiThinking ? 'opacity-0' : 'opacity-100'}`}></div>
+            
+            <h2 className="text-sm font-medium mb-4 tracking-widest text-gray-400 uppercase">
+              {isAiThinking ? 'AI is Thinking...' : 'Current Turn'}
+            </h2>
+            <div className={`flex items-center justify-center gap-4 text-3xl font-bold tracking-tight transition-opacity ${isAiThinking ? 'animate-pulse opacity-50' : ''}`}>
               {renderIcon(currentPlayer.mark, 'w-10 h-10')}
               <span style={{ color: currentPlayer.color }}>
                 {currentPlayer.name}
               </span>
             </div>
-            {isTimerMode && (
+            {isTimerMode && !isAiThinking && (
               <div className="mt-6 text-4xl font-mono font-light tracking-tighter">
                 00:{timeLeft.toString().padStart(2, '0')}
               </div>
@@ -553,9 +792,17 @@ export default function App() {
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">P1 Score</p>
               <p className="text-3xl font-semibold">{scores.p1}</p>
             </div>
-            <div className="text-center border-x border-white/10">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Streak</p>
-              <p className="text-3xl font-semibold text-amber-400">{scores.streak}</p>
+            <div className="text-center flex flex-col justify-center items-center border-x border-white/10">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                {scores.currentStreakHolder ? `${scores.currentStreakHolder} Streak` : 'Streak'}
+              </p>
+              <div className="flex items-center justify-center gap-1">
+                {scores.currentStreakHolder === 'P1' && <Flame className="w-5 h-5 text-sky-400 animate-pulse" />}
+                <p className={`text-3xl font-semibold ${scores.currentStreakHolder === 'P1' ? 'text-sky-400' : scores.currentStreakHolder === 'P2' ? 'text-rose-400' : 'text-gray-500/50'}`}>
+                  {scores.streakCount}
+                </p>
+                {scores.currentStreakHolder === 'P2' && <Flame className="w-5 h-5 text-rose-400 animate-pulse" />}
+              </div>
             </div>
             <div className="text-center">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">P2 Score</p>
@@ -575,7 +822,9 @@ export default function App() {
                 const isCooldown = p.cd > 0;
                 const isDisabled = p.count === 0 || isCooldown || winner !== undefined || isDraw || (mode === 'AI' && !xIsNext);
                 return (
-                  <button
+                  <motion.button
+                    whileHover={isDisabled ? {} : { scale: 1.05 }}
+                    whileTap={isDisabled ? {} : { scale: 0.95 }}
                     key={p.id}
                     disabled={isDisabled}
                     onClick={() => setActivePowerUp(activePowerUp === p.id ? null : p.id as keyof PowerUps)}
@@ -595,7 +844,7 @@ export default function App() {
                         </motion.div>
                       )}
                     </AnimatePresence>
-                  </button>
+                  </motion.button>
                 );
               })}
             </div>
@@ -662,12 +911,12 @@ export default function App() {
           </div>
 
           <div className="flex gap-4 mt-8 w-full max-w-[500px]">
-            <button onClick={() => jumpTo(Math.max(0, stepNumber - (mode === 'AI' ? 2 : 1)))} disabled={stepNumber === 0 || !!winner || isDraw} className="flex-1 modern-card py-4 rounded-2xl font-medium flex items-center justify-center gap-2 hover:bg-white/[0.06] transition disabled:opacity-30">
+            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => jumpTo(Math.max(0, stepNumber - (mode === 'AI' ? 2 : 1)))} disabled={stepNumber === 0 || !!winner || isDraw} className="flex-1 modern-card py-4 rounded-2xl font-medium flex items-center justify-center gap-2 hover:bg-white/[0.06] transition disabled:opacity-30">
               <Undo className="w-5 h-5" /> Undo
-            </button>
-            <button onClick={resetGame} className="flex-1 modern-card py-4 rounded-2xl font-medium flex items-center justify-center gap-2 hover:bg-white/[0.06] transition">
+            </motion.button>
+            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={resetGame} className="flex-1 modern-card py-4 rounded-2xl font-medium flex items-center justify-center gap-2 hover:bg-white/[0.06] transition">
               <RotateCcw className="w-5 h-5" /> Play Again
-            </button>
+            </motion.button>
           </div>
 
           {/* Time Travel History Visualizer */}
@@ -717,10 +966,27 @@ export default function App() {
                 </div>
 
                 <div>
+                  <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Win Condition (in a row)</label>
+                  <div className="flex gap-2">
+                    {[3, 4, 5].map(w => (
+                      <button 
+                        key={w} 
+                        disabled={w > gridSize} 
+                        onClick={() => changeWinLength(w)} 
+                        className={`flex-1 py-3 rounded-xl font-medium transition ${w > gridSize ? 'opacity-30 cursor-not-allowed' : winLength === w ? 'bg-white text-black' : 'bg-white/5 hover:bg-white/10 border border-white/5'}`}
+                      >
+                        {w}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
                   <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Game Mode</label>
                   <div className="flex gap-2">
                     <button onClick={() => setMode('AI')} className={`flex-1 py-3 rounded-xl font-medium transition ${mode === 'AI' ? 'bg-white text-black' : 'bg-white/5 hover:bg-white/10 border border-white/5'}`}>vs AI</button>
                     <button onClick={() => setMode('2P')} className={`flex-1 py-3 rounded-xl font-medium transition ${mode === '2P' ? 'bg-white text-black' : 'bg-white/5 hover:bg-white/10 border border-white/5'}`}>2 Player</button>
+                    <button onClick={() => setMode('ONLINE')} className={`flex-1 py-3 rounded-xl font-medium transition ${mode === 'ONLINE' ? 'bg-white text-black' : 'bg-white/5 hover:bg-white/10 border border-white/5'}`}>Online</button>
                   </div>
                 </div>
 
@@ -739,12 +1005,26 @@ export default function App() {
 
                 <div className="pt-4 border-t border-white/10">
                   <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Theme</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(['modern', 'neon', 'brutalist', 'minimalist'] as Theme[]).map(t => (
-                      <button key={t} onClick={() => setTheme(t)} className={`py-2 rounded-xl font-medium transition capitalize ${theme === t ? 'bg-white text-black' : 'bg-white/5 hover:bg-white/10 border border-white/5'}`}>
-                        {t}
-                      </button>
-                    ))}
+                  <div className="grid grid-cols-2 gap-3">
+                    {(['modern', 'neon', 'brutalist', 'minimalist'] as Theme[]).map(t => {
+                      const isActive = theme === t;
+                      return (
+                        <button 
+                          key={t} 
+                          onClick={() => setTheme(t)} 
+                          className={`relative py-3 px-4 rounded-xl font-bold transition-all duration-200 capitalize flex items-center justify-between ${
+                            isActive 
+                              ? 'bg-sky-500 text-white shadow-[0_0_15px_rgba(56,189,248,0.4)] ring-2 ring-sky-400 scale-[1.02]' 
+                              : 'bg-white/5 hover:bg-white/10 text-gray-400 border border-white/5'
+                          }`}
+                        >
+                          {t}
+                          {isActive && (
+                            <div className="w-2.5 h-2.5 rounded-full bg-white animate-pulse"></div>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -804,6 +1084,103 @@ export default function App() {
           </motion.div>
         )}
 
+        {showProfile && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="modern-card bg-[#0a0a0a]/90 w-full max-w-md p-8 rounded-3xl shadow-2xl border border-white/10 relative max-h-[90vh] overflow-y-auto">
+              <button onClick={() => setShowProfile(false)} className="absolute top-6 right-6 text-gray-400 hover:text-white transition">
+                <X className="w-5 h-5" />
+              </button>
+
+              <h2 className="text-xl font-bold mb-8 flex items-center gap-3">
+                <UserIcon className="text-sky-400 w-5 h-5" /> User Profile
+              </h2>
+
+              {!user ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-4 border border-white/10">
+                    <UserIcon className="w-10 h-10 text-gray-400" />
+                  </div>
+                  <h3 className="text-xl font-bold mb-2">Not Logged In</h3>
+                  <p className="text-gray-400 text-sm mb-8 px-4">Sign in to track your global stats, customize your avatar, and appear on the leaderboard!</p>
+                  <button 
+                    onClick={async () => {
+                      if (!auth) return alert("Firebase environment variables are missing! Check your AI Studio settings.");
+                      try {
+                        await signInWithPopup(auth, new GoogleAuthProvider());
+                      } catch(e) { console.error(e); }
+                    }} 
+                    className="flex items-center gap-3 bg-white text-black px-8 py-3 rounded-xl font-bold hover:bg-gray-100 transition shadow-[0_0_20px_rgba(255,255,255,0.3)]"
+                  >
+                    <LogIn className="w-5 h-5" /> Sign in with Google
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-8">
+                  {/* Avatar & Info */}
+                  <div className="flex items-center gap-6 p-4 bg-white/5 rounded-2xl border border-white/5">
+                    <img 
+                      src={user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.uid}`} 
+                      alt="Avatar" 
+                      className="w-20 h-20 rounded-full border-2 border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.3)] bg-black/50"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div>
+                      <h3 className="text-xl font-bold text-white">{user.displayName || 'Player'}</h3>
+                      <p className="text-sm text-gray-400 truncate max-w-[200px]">{user.email}</p>
+                      <button onClick={() => { if(auth) signOut(auth) }} className="mt-2 text-xs flex items-center gap-1 text-rose-400 hover:text-rose-300 transition">
+                        <LogOut className="w-3 h-3" /> Sign Out
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Avatar Customization */}
+                  <div>
+                    <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Customize Avatar</h4>
+                    <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                      {['bottts', 'adventurer', 'avataaars', 'fun-emoji', 'micah'].map(style => {
+                        const url = `https://api.dicebear.com/7.x/${style}/svg?seed=${user.uid}`;
+                        const isCurrent = user.photoURL === url || (!user.photoURL && style === 'bottts');
+                        return (
+                          <button 
+                            key={style}
+                            onClick={async () => {
+                              try {
+                                await updateProfile(user, { photoURL: url });
+                                setUser({ ...user, photoURL: url } as User); 
+                              } catch(e) { console.error(e) }
+                            }}
+                            className={`relative min-w-16 w-16 h-16 rounded-xl overflow-hidden border-2 transition-all ${isCurrent ? 'border-sky-400 scale-105 shadow-[0_0_10px_rgba(56,189,248,0.3)]' : 'border-transparent hover:border-white/20 hover:scale-105 bg-white/5'}`}
+                          >
+                            <img src={url} alt={style} className="w-full h-full object-cover" />
+                            {isCurrent && <div className="absolute inset-0 bg-sky-500/20 flex items-center justify-center"><Check className="w-5 h-5 text-white" /></div>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-gray-500 mt-2">Provided by DiceBear</p>
+                  </div>
+
+                  {/* Stats */}
+                  <div>
+                    <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Global Stats</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
+                        <p className="text-xs text-gray-400 mb-1">Total Wins</p>
+                        <p className="text-3xl font-bold text-sky-400">{userStats.wins}</p>
+                      </div>
+                      <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
+                        <p className="text-xs text-gray-400 mb-1">Games Recorded</p>
+                        <p className="text-3xl font-bold text-white">{userStats.total}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+
         {showLeaderboard && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
             <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="modern-card bg-[#0a0a0a]/90 p-8 rounded-[2rem] w-full max-w-md border border-white/10">
@@ -817,7 +1194,13 @@ export default function App() {
               {!user ? (
                 <div className="text-center py-12">
                   <p className="mb-6 text-gray-400">Sign in to save your scores and compete globally.</p>
-                  <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="bg-white text-black px-6 py-3 rounded-xl font-medium flex items-center gap-2 mx-auto hover:bg-gray-200 transition">
+                  <button onClick={() => {
+                    if (!auth) {
+                      alert("Firebase environment variables are missing! Please check your AI Studio settings.");
+                      return;
+                    }
+                    signInWithPopup(auth, new GoogleAuthProvider())
+                  }} className="bg-white text-black px-6 py-3 rounded-xl font-medium flex items-center gap-2 mx-auto hover:bg-gray-200 transition">
                     <LogIn className="w-5 h-5" /> Sign In with Google
                   </button>
                 </div>
@@ -825,7 +1208,7 @@ export default function App() {
                 <div className="flex flex-col h-full max-h-[60vh]">
                   <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/10 shrink-0">
                     <span className="font-medium">{user.displayName}</span>
-                    <button onClick={() => signOut(auth)} className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1"><LogOut className="w-4 h-4" /> Sign Out</button>
+                    <button onClick={() => { if(auth) signOut(auth) }} className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1"><LogOut className="w-4 h-4" /> Sign Out</button>
                   </div>
                   
                   <div className="flex gap-2 mb-4 shrink-0">
@@ -851,6 +1234,60 @@ export default function App() {
                         <span className="font-semibold text-amber-400">{entry.wins} Wins</span>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+        {showHistory && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="modern-card bg-[#0a0a0a]/90 p-8 rounded-[2rem] w-full max-w-lg border border-white/10">
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-xl font-semibold tracking-tight flex items-center gap-2">
+                  <History className="w-5 h-5 text-sky-400" /> Match History
+                </h2>
+                <button onClick={() => setShowHistory(false)} className="p-2 hover:bg-white/10 rounded-full transition"><X className="w-5 h-5" /></button>
+              </div>
+              
+              {!user ? (
+                <div className="text-center py-12">
+                   <p className="text-gray-400 mb-6">Sign in to view your match history.</p>
+                   <button onClick={() => {
+                    if (!auth) {
+                      alert("Firebase environment variables are missing! Please check your AI Studio settings.");
+                      return;
+                    }
+                    signInWithPopup(auth, new GoogleAuthProvider())
+                  }} className="bg-white text-black px-6 py-3 rounded-xl font-medium flex items-center gap-2 mx-auto hover:bg-gray-200 transition">
+                    <LogIn className="w-5 h-5" /> Sign In with Google
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col max-h-[60vh]">
+                  <div className="space-y-3 overflow-y-auto pr-2">
+                    {gameHistory.length === 0 ? (
+                      <p className="text-center text-gray-500 py-8">No match history found. Play a game!</p>
+                    ) : (
+                      gameHistory.map((game, i) => (
+                        <div key={i} className="flex justify-between items-center bg-white/[0.02] border border-white/5 p-4 rounded-xl flex-wrap gap-2">
+                          <div>
+                            <p className="font-medium flex items-center gap-2 text-sm">
+                              {game.outcome === 'Win' ? <Trophy className="w-4 h-4 text-emerald-400" /> : game.outcome === 'Loss' ? <Skull className="w-4 h-4 text-rose-400" /> : <div className="w-4 h-4 bg-gray-500 rounded-full"></div>}
+                              <span className={game.outcome === 'Win' ? 'text-emerald-400' : game.outcome === 'Loss' ? 'text-rose-400' : 'text-gray-400'}>{game.outcome}</span>
+                              <span className="text-gray-500 mx-1">vs</span> 
+                              <span>{game.opponent}</span>
+                            </p>
+                            <p className="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">{game.gridSize}x{game.gridSize} Grid</p>
+                          </div>
+                          {game.timestamp && (
+                            <span className="text-xs text-gray-500 font-medium">
+                              {new Date(game.timestamp?.toMillis ? game.timestamp.toMillis() : Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               )}

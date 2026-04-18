@@ -658,7 +658,12 @@ export default function App() {
       await signInWithPopup(auth, provider);
     } catch (e: any) {
       console.error(e);
-      alert(`Login failed: ${e.message}\n\nIf you are viewing this inside the AI Studio preview, you may need to click 'Open App' in the top right to open the app in a new tab for Google Login to work.`);
+      if (e.code === 'auth/popup-closed-by-user') {
+        // Ignore if user intentionally closed the popup, or it was blocked contextually
+        console.log('Login popup was closed before completion.');
+      } else {
+        alert(`Login failed: ${e.message}\n\nIf you are viewing this inside the AI Studio preview, you may need to click 'Open App' in the top right to open the app in a new tab for Google Login to work.`);
+      }
     }
   };
 

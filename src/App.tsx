@@ -802,16 +802,45 @@ export default function App() {
   };
 
   return (
-    <div className="bg-surface text-on-surface font-body min-h-screen selection:bg-primary-container/30 overflow-hidden relative pb-28">
+    <div className="text-on-surface font-body min-h-screen selection:bg-primary-container/30 overflow-hidden relative pb-28">
       {/* Background Elements */}
-      <div className="fixed inset-0 pointer-events-none -z-20 overflow-hidden">
-        <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-violet-900/10 blur-[150px] rounded-full"></div>
-        <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-900/10 blur-[150px] rounded-full"></div>
-        <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "url('https://www.transparenttextures.com/patterns/dark-matter.png')" }}></div>
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-all duration-1000">
+        {theme === 'modern' && (
+          <>
+            <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-violet-900/10 blur-[150px] rounded-full"></div>
+            <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-900/10 blur-[150px] rounded-full"></div>
+            <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "url('https://www.transparenttextures.com/patterns/dark-matter.png')" }}></div>
+          </>
+        )}
+        {theme === 'neon' && (
+          <>
+            <div className="absolute top-[0%] right-[0%] w-[60%] h-[60%] bg-fuchsia-600/20 blur-[120px] rounded-full mix-blend-screen"></div>
+            <div className="absolute bottom-[0%] left-[0%] w-[60%] h-[60%] bg-cyan-500/20 blur-[120px] rounded-full mix-blend-screen"></div>
+            <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: "linear-gradient(rgba(0, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 255, 255, 0.1) 1px, transparent 1px)", backgroundSize: "40px 40px" }}></div>
+          </>
+        )}
+        {theme === 'brutalist' && (
+          <>
+            <div className="absolute inset-0 bg-[#0e0e0e]" style={{ backgroundImage: "url('https://www.transparenttextures.com/patterns/concrete-wall.png')", opacity: 0.1 }}></div>
+            <div className="absolute top-[10%] left-[10%] w-[80%] h-[1px] bg-white/20"></div>
+            <div className="absolute top-[30%] left-[10%] w-[80%] h-[1px] bg-white/10"></div>
+            <div className="absolute top-[10%] left-[10%] w-[1px] h-[80%] bg-white/20"></div>
+            <div className="absolute top-[10%] right-[10%] w-[1px] h-[80%] bg-white/20"></div>
+          </>
+        )}
+        {theme === 'minimalist' && (
+          <>
+            <div className="absolute inset-0 bg-[#0a0a0a]"></div>
+            <div className="absolute inset-0 opacity-[0.01]" style={{ backgroundImage: "url('https://www.transparenttextures.com/patterns/stardust.png')" }}></div>
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80vw] h-[80vw] border-[1px] border-white/5 rounded-full"></div>
+          </>
+        )}
       </div>
 
-      {/* TopNavBar (Shared Component) */}
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center gap-6 rounded-full mt-4 mx-auto w-fit max-w-[calc(100vw-32px)] px-6 py-2 bg-slate-900/60 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(88,17,255,0.1)]">
+      <div className="relative z-10">
+        {/* TopNavBar (Shared Component) */}
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center gap-6 rounded-full mt-4 mx-auto w-fit max-w-[calc(100vw-32px)] px-6 py-2 bg-slate-900/60 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(88,17,255,0.1)]">
+
         <div className="hidden sm:block text-2xl font-bold bg-gradient-to-br from-violet-500 to-violet-700 bg-clip-text text-transparent font-headline tracking-tight">XO Arena</div>
         <div className="hidden sm:block h-6 w-[1px] bg-outline-variant/30"></div>
         <div className="flex items-center gap-2">
@@ -1496,10 +1525,6 @@ export default function App() {
 
                 {/* Footer Section */}
                 <div className="mt-12 flex items-center justify-center gap-8 text-[10px] uppercase font-mono tracking-[0.3em] text-on-surface-variant">
-                  <span className="cursor-pointer hover:text-primary transition-colors">Protocol Privacy</span>
-                  <span className="w-1 h-1 bg-white/10 rounded-full"></span>
-                  <span className="cursor-pointer hover:text-primary transition-colors">Terms of Engagement</span>
-                  <span className="w-1 h-1 bg-white/10 rounded-full"></span>
                   <span className="cursor-pointer hover:text-primary transition-colors">v4.2.0-STABLE</span>
                 </div>
               </div>
@@ -1794,6 +1819,7 @@ export default function App() {
           <span className="font-['Inter'] text-[10px] uppercase tracking-widest mt-1">Profile</span>
         </div>
       </footer>
+      </div>
     </div>
   );
 }

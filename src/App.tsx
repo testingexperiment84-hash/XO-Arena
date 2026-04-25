@@ -155,6 +155,10 @@ export default function App() {
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [aiProgress, setAiProgress] = useState(0);
 
+  const [isSoundMuted, setIsSoundMuted] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
+
   const updatePlayerIcon = (playerNum: 1 | 2, icon: string) => {
     if (playerNum === 1) {
       if (player2.icon === icon && player2.iconType === 'lucide') {
@@ -181,6 +185,7 @@ export default function App() {
   // --- Audio ---
   const audioCtxRef = useRef<AudioContext | null>(null);
   const playSound = (type: 'place' | 'win' | 'draw' | 'powerup') => {
+    if (isSoundMuted) return;
     if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     const ctx = audioCtxRef.current;
     if (ctx.state === 'suspended') ctx.resume();
@@ -234,6 +239,13 @@ export default function App() {
   useEffect(() => {
     document.body.className = `theme-${theme}`;
   }, [theme]);
+
+  useEffect(() => {
+    if (!localStorage.getItem('xo_tutorial_seen')) {
+      setShowTutorial(true);
+      localStorage.setItem('xo_tutorial_seen', 'true');
+    }
+  }, []);
 
   useEffect(() => {
     if (!auth) return;
@@ -854,6 +866,12 @@ export default function App() {
           )}
         </div>
         <nav className="flex items-center gap-4 sm:ml-4">
+          <button onClick={() => setIsSoundMuted(!isSoundMuted)} className="text-slate-400 hover:text-cyan-400 transition-colors scale-90 relative">
+            <span className="material-symbols-outlined">{isSoundMuted ? 'volume_off' : 'volume_up'}</span>
+          </button>
+          <button onClick={() => setShowTutorial(true)} className="text-slate-400 hover:text-cyan-400 transition-colors scale-90 relative">
+            <span className="material-symbols-outlined">help</span>
+          </button>
           {mode === 'ONLINE' && roomId && (
             <button onClick={() => setShowChat(true)} className="text-slate-400 hover:text-cyan-400 transition-colors scale-95 active:scale-90 relative">
               <span className="material-symbols-outlined">chat</span>
@@ -1818,6 +1836,109 @@ export default function App() {
           <span className="font-['Inter'] text-[10px] uppercase tracking-widest mt-1">Profile</span>
         </div>
       </footer>
+
+      {/* Tutorial / Onboarding Modal */}
+      <AnimatePresence>
+        {showTutorial && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-surface-container-high w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl border border-white/10 relative mt-16 sm:mt-0">
+              <button onClick={() => setShowTutorial(false)} className="absolute top-4 right-4 text-on-surface-variant hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors z-10">
+                <X className="w-5 h-5" />
+              </button>
+              
+              <div className="p-8">
+                {tutorialStep === 0 && (
+                  <div className="text-center">
+                    <div className="w-20 h-20 bg-gradient-to-br from-primary to-secondary rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg shadow-primary/30 text-white">
+                      <span className="material-symbols-outlined text-4xl">sports_esports</span>
+                    </div>
+                    <h2 className="text-3xl font-headline font-bold mb-4">Welcome to XO Arena</h2>
+                    <p className="text-on-surface-variant mb-6 text-sm leading-relaxed">
+                      Experience Tic-Tac-Toe evolved. With dynamic grid sizes, powerful abilities, and competitive matchmaking, strategy is redefined.
+                    </p>
+                  </div>
+                )}
+                
+                {tutorialStep === 1 && (
+                  <div>
+                    <h2 className="text-2xl font-headline font-bold mb-6 text-center">Power-Ups Arsenal</h2>
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-4 bg-surface-container p-4 rounded-2xl border border-white/5">
+                        <span className="material-symbols-outlined text-primary text-3xl">ink_eraser</span>
+                        <div>
+                          <h4 className="font-bold text-sm text-primary">Remove (Cooldown: 3)</h4>
+                          <p className="text-xs text-on-surface-variant">Erase any opponent's mark from the board.</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 bg-surface-container p-4 rounded-2xl border border-white/5">
+                        <span className="material-symbols-outlined text-secondary-dim text-3xl">shield</span>
+                        <div>
+                          <h4 className="font-bold text-sm text-secondary-dim">Block (Cooldown: 4)</h4>
+                          <p className="text-xs text-on-surface-variant">Place an immovable block that nobody can claim.</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 bg-surface-container p-4 rounded-2xl border border-white/5">
+                        <span className="material-symbols-outlined text-tertiary text-3xl">dynamic_feed</span>
+                        <div>
+                          <h4 className="font-bold text-sm text-tertiary">Double (Cooldown: 4)</h4>
+                          <p className="text-xs text-on-surface-variant">Take two consecutive turns to outmaneuver.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {tutorialStep === 2 && (
+                  <div className="text-center">
+                    <h2 className="text-2xl font-headline font-bold mb-6">Game Modes</h2>
+                    <p className="text-on-surface-variant text-sm mb-6">
+                      Customize your match in the Settings panel:
+                    </p>
+                    <ul className="text-left space-y-3 mb-6 bg-surface-container rounded-2xl p-4 border border-white/5 text-sm w-full max-w-sm mx-auto">
+                      <li className="flex items-start gap-3">
+                        <span className="text-primary font-bold mt-1">•</span>
+                        <span><b>Grid Size:</b> Play classic 3x3, or expand to 4x4 and 5x5 for massive battles.</span>
+                      </li>
+                      <li className="flex items-start gap-3">
+                        <span className="text-secondary font-bold mt-1">•</span>
+                        <span><b>Timer Mode:</b> Limit turns to 10 seconds. Play fast or lose!</span>
+                      </li>
+                      <li className="flex items-start gap-3">
+                        <span className="text-tertiary font-bold mt-1">•</span>
+                        <span><b>Multiplayer:</b> Battle our adaptive AI, invite a friend locally, or host an online room.</span>
+                      </li>
+                    </ul>
+                  </div>
+                )}
+
+                <div className="mt-8 flex items-center justify-between">
+                  <div className="flex gap-2">
+                    {[0, 1, 2].map(step => (
+                      <div key={step} className={`w-2 h-2 rounded-full transition-all ${tutorialStep === step ? 'bg-primary w-4' : 'bg-surface-container-highest'}`} />
+                    ))}
+                  </div>
+                  <div className="flex gap-3">
+                    {tutorialStep > 0 && (
+                      <button onClick={() => setTutorialStep(s => s - 1)} className="px-4 py-2 rounded-full text-sm font-bold text-on-surface-variant hover:bg-surface-container transition-colors">
+                        Back
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => {
+                        if (tutorialStep < 2) setTutorialStep(s => s + 1);
+                        else { setShowTutorial(false); setTutorialStep(0); }
+                      }} 
+                      className="px-6 py-2 rounded-full bg-gradient-to-r from-primary to-primary-dim text-white text-sm font-bold shadow-[0_0_15px_rgba(88,17,255,0.4)] hover:brightness-110 transition-all"
+                    >
+                      {tutorialStep < 2 ? 'Next' : 'Play Now'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

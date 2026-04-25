@@ -802,9 +802,9 @@ export default function App() {
   };
 
   return (
-    <div className="text-on-surface font-body min-h-screen selection:bg-primary-container/30 overflow-hidden relative pb-28">
+    <div className="text-on-surface font-body min-h-screen selection:bg-primary-container/30 overflow-x-hidden relative pb-28">
       {/* Background Elements */}
-      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-all duration-1000">
+      <div className="fixed inset-0 pointer-events-none -z-20 overflow-hidden transition-all duration-1000">
         {theme === 'modern' && (
           <>
             <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-violet-900/10 blur-[150px] rounded-full"></div>
@@ -837,9 +837,8 @@ export default function App() {
         )}
       </div>
 
-      <div className="relative z-10">
-        {/* TopNavBar (Shared Component) */}
-        <header className="fixed top-0 left-0 right-0 z-50 flex items-center gap-6 rounded-full mt-4 mx-auto w-fit max-w-[calc(100vw-32px)] px-6 py-2 bg-slate-900/60 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(88,17,255,0.1)]">
+      {/* TopNavBar (Shared Component) */}
+      <header className="fixed top-0 left-0 right-0 z-50 flex items-center gap-6 rounded-full mt-4 mx-auto w-fit max-w-[calc(100vw-32px)] px-6 py-2 bg-slate-900/60 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(88,17,255,0.1)]">
 
         <div className="hidden sm:block text-2xl font-bold bg-gradient-to-br from-violet-500 to-violet-700 bg-clip-text text-transparent font-headline tracking-tight">XO Arena</div>
         <div className="hidden sm:block h-6 w-[1px] bg-outline-variant/30"></div>
@@ -884,7 +883,7 @@ export default function App() {
               <img className="w-full h-full object-cover opacity-20 grayscale brightness-50" referrerPolicy="no-referrer" alt="background texture" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBDdEwZeWlWAGgSs-CshUYj5o8SryJ3LfwOj6sQ1_yc0Y-gAqXItk3tlmPtJC14d-XoREvgJTffWzq-9OfwO5ubjLP2iMY8Kfdyd1ymZq0L2YQjdxKv0Qthg_8kp_uKkpkVu37LMmCAmMC29Z32UepOdOGy93xMiMEsQay0sdt2IWp-CUjRlq0l7rBjT6nxyIYk5f4_dd8tgsPrxIIsRCvoIaOPaOxVyzNxw6p35kJgZxYDWchlQ_BkBbWI_5OupPXjEtHZGOCZUjE"/>
             </div>
 
-            <motion.section initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="relative z-10 w-full max-w-5xl bg-surface-container-high/40 backdrop-blur-[40px] rounded-lg border-t border-white/5 shadow-2xl overflow-hidden flex flex-col md:grid md:grid-cols-12 gap-0 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <motion.section initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="relative z-10 w-full max-w-5xl bg-surface-container-high/40 backdrop-blur-[40px] rounded-lg border-t border-white/5 shadow-2xl overflow-x-hidden flex flex-col md:grid md:grid-cols-12 gap-0 max-h-[90vh] overflow-y-auto custom-scrollbar">
               
               {/* Left Side: Status & Global Waiting State */}
               <div className="col-span-12 md:col-span-5 p-8 md:p-12 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-white/5 bg-surface-container-lowest/30 shrink-0">
@@ -1819,7 +1818,6 @@ export default function App() {
           <span className="font-['Inter'] text-[10px] uppercase tracking-widest mt-1">Profile</span>
         </div>
       </footer>
-      </div>
     </div>
   );
 }

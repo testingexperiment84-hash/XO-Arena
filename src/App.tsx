@@ -1263,39 +1263,59 @@ export default function App() {
         <section className="md:col-span-8 flex flex-col gap-8">
           
           {/* Game Board Container */}
-          <div className="relative flex items-center justify-center py-8">
+          <div className={`relative flex items-center justify-center py-12 ${theme === 'brutalist' ? 'perspective-[1500px]' : ''}`}>
             {/* Decorative Glows */}
-            <div className="absolute w-96 h-96 bg-primary/5 blur-[100px] -z-10 rounded-full"></div>
+            <div className={`absolute w-96 h-96 blur-[100px] -z-10 rounded-full ${theme === 'brutalist' ? 'bg-[#b1a1ff]/10' : 'bg-primary/5'}`}></div>
             
             <div 
               style={{
                 display: 'grid',
                 gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))`,
-                gap: '1rem',
+                gap: theme === 'brutalist' ? '1.5rem' : '1rem',
                 width: '100%',
                 maxWidth: '500px',
-                aspectRatio: '1/1'
+                aspectRatio: '1/1',
+                transformStyle: 'preserve-3d',
+                transform: theme === 'brutalist' ? 'rotateX(25deg) rotateY(-20deg) translateZ(0)' : 'none',
+                transition: 'transform 0.5s ease, gap 0.5s ease'
               }}
+              className={theme === 'brutalist' ? 'p-6 bg-neutral-900/40 rounded-xl border-[6px] border-neutral-800 shadow-[30px_30px_0px_0px_rgba(0,0,0,0.8)] backdrop-blur-sm' : ''}
             >
               {board.map((cell, i) => {
                 const isWinningCell = winningLine.includes(i);
+                
+                const brutalistBase = "bg-[#111] border-[3px] border-neutral-700 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] active:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-x-[6px] active:translate-y-[6px]";
+                const normalBase = "glass-panel rounded-xl border hover:bg-white/5 border-white/5";
+                
                 return (
                   <button
                     key={i}
                     onClick={() => handleCellClick(i)}
-                    className={`glass-panel aspect-square rounded-xl border hover:bg-white/5 transition-all flex items-center justify-center group overflow-hidden ${
-                      isWinningCell ? 'ring-2 ring-primary border-primary bg-primary/20 shadow-[0_0_25px_rgba(177,161,255,0.6)] z-10 scale-[1.02]' : 'border-white/5'
-                    } ${activePowerUp === 'remove' && cell && cell !== 'BLOCK' && cell !== currentPlayer.mark ? 'ring-1 ring-error cursor-crosshair' : ''}`}
+                    className={`aspect-square transition-all flex items-center justify-center group overflow-hidden ${
+                      theme === 'brutalist' ? brutalistBase : normalBase
+                    } ${
+                      isWinningCell && theme !== 'brutalist' ? 'ring-2 ring-primary border-primary bg-primary/20 shadow-[0_0_25px_rgba(177,161,255,0.6)] z-10 scale-[1.02] !border-primary' : ''
+                    } ${
+                      isWinningCell && theme === 'brutalist' ? '!border-[#b1a1ff] bg-[#b1a1ff]/5 shadow-[8px_8px_0px_0px_#b1a1ff] z-10 translate-x-[-2px] translate-y-[-2px]' : ''
+                    } ${activePowerUp === 'remove' && cell && cell !== 'BLOCK' && cell !== currentPlayer.mark ? 'ring-2 ring-error cursor-crosshair' : ''}`}
+                    style={{
+                       transformStyle: theme === 'brutalist' ? 'preserve-3d' : 'flat',
+                       transform: theme === 'brutalist' && cell ? 'translateZ(15px)' : 'none'
+                    }}
                   >
                     <AnimatePresence>
                       {cell && (
                         <motion.div
-                          initial={{ scale: 0.5, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
+                          initial={{ scale: 0.5, opacity: 0, translateZ: theme === 'brutalist' ? 50 : 0 }}
+                          animate={{ scale: 1, opacity: 1, translateZ: 0 }}
                           transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                          className="w-full h-full absolute inset-0 flex items-center justify-center group-hover:scale-110 transition-transform"
+                          className="w-full h-full relative flex items-center justify-center group-hover:scale-110 transition-transform"
+                          style={{
+                             transformStyle: theme === 'brutalist' ? 'preserve-3d' : 'flat',
+                             filter: theme === 'brutalist' ? 'drop-shadow(3px 3px 0px rgba(0,0,0,0.5))' : 'none'
+                          }}
                         >
-                          {renderIcon(cell, 'w-3/4 h-3/4')}
+                          {renderIcon(cell, 'w-3/4 h-3/4 absolute inset-0 m-auto')}
                         </motion.div>
                       )}
                     </AnimatePresence>

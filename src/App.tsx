@@ -114,6 +114,7 @@ export default function App() {
   const [mode, setMode] = useState<'2P' | 'AI' | 'ONLINE'>('AI');
   const [roomId, setRoomId] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
+  const [isSpectator, setIsSpectator] = useState(false);
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [onlineStatus, setOnlineStatus] = useState<'waiting' | 'playing' | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>('MEDIUM');
@@ -149,13 +150,19 @@ export default function App() {
   const [gameHistory, setGameHistory] = useState<any[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
-  const [userStats, setUserStats] = useState({ wins: 0, draws: 0, total: 0 });
+  const [userStats, setUserStats] = useState({ 
+    wins: 0, losses: 0, draws: 0, total: 0, 
+    longestStreak: 0, 
+    avgDurationAI: 0, avgDuration2P: 0, avgDurationOnline: 0 
+  });
+  const [gameStartTime, setGameStartTime] = useState(Date.now());
   const [lbFilterMode, setLbFilterMode] = useState<'ALL' | 'AI' | '2P' | 'ONLINE'>('ALL');
   const [lbFilterGrid, setLbFilterGrid] = useState<'ALL' | 3 | 4 | 5>('ALL');
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [aiProgress, setAiProgress] = useState(0);
 
   const [isSoundMuted, setIsSoundMuted] = useState(false);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
 
@@ -262,14 +269,41 @@ export default function App() {
   const fetchUserStats = async (uid: string) => {
     if (!db) return;
     try {
-      const q = query(collection(db, 'gameHistory'), where('userId', '==', uid));
+      const q = query(collection(db, 'gameHistory'), where('userId', '==', uid), orderBy('timestamp', 'asc'));
       const snapshot = await getDocs(q);
-      let wins = 0;
-      let total = snapshot.docs.length;
+      let wins = 0, losses = 0, draws = 0;
+      let streak = 0, longestStreak = 0;
+      
+      let durationAI = 0, countAI = 0;
+      let duration2P = 0, count2P = 0;
+      let durationOnline = 0, countOnline = 0;
+
+      const total = snapshot.docs.length;
+
       snapshot.docs.forEach(doc => {
-        if (doc.data().outcome === 'Win') wins++;
+        const data = doc.data();
+        if (data.outcome === 'Win') {
+            wins++;
+            streak++;
+            if (streak > longestStreak) longestStreak = streak;
+        } else {
+            if (data.outcome === 'Loss') losses++;
+            if (data.outcome === 'Draw') draws++;
+            streak = 0;
+        }
+
+        if (data.durationSec) {
+            if (data.gameMode === 'AI') { durationAI += data.durationSec; countAI++; }
+            if (data.gameMode === '2P') { duration2P += data.durationSec; count2P++; }
+            if (data.gameMode === 'ONLINE') { durationOnline += data.durationSec; countOnline++; }
+        }
       });
-      setUserStats({ wins, draws: 0, total });
+      setUserStats({ 
+          wins, losses, draws, total, longestStreak,
+          avgDurationAI: countAI > 0 ? durationAI / countAI : 0,
+          avgDuration2P: count2P > 0 ? duration2P / count2P : 0,
+          avgDurationOnline: countOnline > 0 ? durationOnline / countOnline : 0
+      });
     } catch (e) {
       console.error("Error fetching stats:", e);
     }
@@ -334,6 +368,9 @@ export default function App() {
     if (winner && winner !== 'BLOCK') {
       playSound('win');
       confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: [player1.color, player2.color] });
+      setTimeout(() => {
+        confetti({ particleCount: 100, spread: 120, origin: { y: 0.6 }, startVelocity: 45, colors: [player1.color, player2.color] });
+      }, 300);
       setScores(s => {
         const isP1 = winner === player1.mark;
         const streakHolder = isP1 ? 'P1' as const : 'P2' as const;
@@ -404,7 +441,30 @@ export default function App() {
     };
 
     if (difficulty === 'EASY') {
+       if (Math.random() < 0.2) {
+           for (let move of available) if (wins(move, aiMark)) return move;
+           for (let move of available) if (wins(move, pMark)) return move;
+       }
        return available[Math.floor(Math.random() * available.length)];
+    }
+
+    if (difficulty === 'MEDIUM') {
+        if (Math.random() < 0.6) {
+           for (let move of available) if (wins(move, aiMark)) return move;
+           for (let move of available) if (wins(move, pMark)) return move;
+        }
+        if (Math.random() < 0.5) {
+             const center = Math.floor(gridSize * gridSize / 2);
+             if (available.includes(center)) return center;
+        }
+        return available[Math.floor(Math.random() * available.length)];
+    }
+
+    if (difficulty === 'HARD') {
+        const errorChance = 0.05; // 5% chance of suboptimal move
+        if (Math.random() < errorChance) {
+             return available[Math.floor(Math.random() * available.length)];
+        }
     }
 
     // 1. Immediate Win
@@ -478,6 +538,7 @@ export default function App() {
   };
 
   const handleCellClick = (index: number, isAi = false) => {
+    if (isSpectator) return;
     if (winner || isDraw || (mode === 'AI' && !xIsNext && !isAi)) return;
     if (mode === 'ONLINE') {
       if (onlineStatus !== 'playing') return;
@@ -574,6 +635,8 @@ export default function App() {
   };
 
   const resetGame = () => {
+    if (isSpectator) return;
+    setGameStartTime(Date.now());
     setHistory([Array(gridSize * gridSize).fill(null)]);
     setStepNumber(0);
     setXIsNext(true);
@@ -630,20 +693,18 @@ export default function App() {
     } catch (e) { console.error(e) }
   };
 
-  const joinMultiplayerGame = async (code: string) => {
+  const joinMultiplayerGame = async (code: string, asSpectator = false) => {
     if (!user || !db) return alert("Sign in to play online!");
     const roomRef = doc(db, 'games', code.toUpperCase());
     try {
       const snap = await getDoc(roomRef);
       if (snap.exists()) {
         const data = snap.data();
-        if (data.status === 'waiting' && data.host.uid !== user.uid) {
-          await updateDoc(roomRef, {
-            guest: { uid: user.uid, displayName: user.displayName || 'P2', mark: 'P2' },
-            status: 'playing'
-          });
+        if (asSpectator || (data.status !== 'waiting' && data.host.uid !== user.uid && data.guest?.uid !== user.uid)) {
+          // Join as spectator
           setRoomId(code.toUpperCase());
           setIsHost(false);
+          setIsSpectator(true);
           setMode('ONLINE');
           setOnlineStatus('playing');
           setGridSize(data.gridSize);
@@ -652,7 +713,24 @@ export default function App() {
           setHistory(st.history);
           setStepNumber(st.stepNumber);
           setXIsNext(st.xIsNext);
-        } else { alert('Room is full or you are the host.'); }
+        } else if (data.status === 'waiting' && data.host.uid !== user.uid) {
+          // Join as player 2
+          await updateDoc(roomRef, {
+            guest: { uid: user.uid, displayName: user.displayName || 'P2', mark: 'P2' },
+            status: 'playing'
+          });
+          setRoomId(code.toUpperCase());
+          setIsHost(false);
+          setIsSpectator(false);
+          setMode('ONLINE');
+          setOnlineStatus('playing');
+          setGridSize(data.gridSize);
+          setWinLength(data.winLength);
+          const st = JSON.parse(data.stateStr);
+          setHistory(st.history);
+          setStepNumber(st.stepNumber);
+          setXIsNext(st.xIsNext);
+        } else { alert('You are the host or already in the room.'); }
       } else { alert('Room not found'); }
     } catch (e) { console.error(e) }
   };
@@ -690,6 +768,7 @@ export default function App() {
             text: msgText,
             senderId: user.uid,
             senderName: user.displayName || 'Anonymous',
+            isSpectator: isSpectator,
             timestamp: serverTimestamp()
         });
     } catch(err) {
@@ -716,14 +795,17 @@ export default function App() {
   const saveToHistory = async (outcome: 'Win' | 'Loss' | 'Draw') => {
     if (!user || !db) return;
     try {
+      const durationSec = Math.floor((Date.now() - gameStartTime) / 1000);
       await addDoc(collection(db, 'gameHistory'), {
         userId: user.uid,
         opponent: mode === 'AI' ? `AI (${difficulty})` : player2.name,
         outcome,
         gridSize,
+        durationSec,
         timestamp: serverTimestamp(),
         gameMode: mode
       });
+      fetchUserStats(user.uid);
     } catch (e) {
       console.error("Error saving history:", e);
     }
@@ -815,38 +897,48 @@ export default function App() {
 
   return (
     <div className="text-on-surface font-body min-h-screen selection:bg-primary-container/30 overflow-x-hidden relative pb-28">
+      {/* Background Music Player */}
+      <audio
+        id="bg-music"
+        src="https://cdn.pixabay.com/download/audio/2021/11/24/audio_3d1efda232.mp3?filename=electronic-ambient-2-72018.mp3"
+        autoPlay={isMusicPlaying}
+        loop
+        muted={!isMusicPlaying}
+      />
       {/* Background Elements */}
-      <div className="fixed inset-0 pointer-events-none -z-20 overflow-hidden transition-all duration-1000">
-        {theme === 'modern' && (
-          <>
-            <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-violet-900/10 blur-[150px] rounded-full"></div>
-            <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-900/10 blur-[150px] rounded-full"></div>
-            <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "url('https://www.transparenttextures.com/patterns/dark-matter.png')" }}></div>
-          </>
-        )}
-        {theme === 'neon' && (
-          <>
-            <div className="absolute top-[0%] right-[0%] w-[60%] h-[60%] bg-fuchsia-600/20 blur-[120px] rounded-full mix-blend-screen"></div>
-            <div className="absolute bottom-[0%] left-[0%] w-[60%] h-[60%] bg-cyan-500/20 blur-[120px] rounded-full mix-blend-screen"></div>
-            <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: "linear-gradient(rgba(0, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 255, 255, 0.1) 1px, transparent 1px)", backgroundSize: "40px 40px" }}></div>
-          </>
-        )}
-        {theme === 'brutalist' && (
-          <>
-            <div className="absolute inset-0 bg-[#0e0e0e]" style={{ backgroundImage: "url('https://www.transparenttextures.com/patterns/concrete-wall.png')", opacity: 0.1 }}></div>
-            <div className="absolute top-[10%] left-[10%] w-[80%] h-[1px] bg-white/20"></div>
-            <div className="absolute top-[30%] left-[10%] w-[80%] h-[1px] bg-white/10"></div>
-            <div className="absolute top-[10%] left-[10%] w-[1px] h-[80%] bg-white/20"></div>
-            <div className="absolute top-[10%] right-[10%] w-[1px] h-[80%] bg-white/20"></div>
-          </>
-        )}
-        {theme === 'minimalist' && (
-          <>
-            <div className="absolute inset-0 bg-[#0a0a0a]"></div>
-            <div className="absolute inset-0 opacity-[0.01]" style={{ backgroundImage: "url('https://www.transparenttextures.com/patterns/stardust.png')" }}></div>
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80vw] h-[80vw] border-[1px] border-white/5 rounded-full"></div>
-          </>
-        )}
+      <div className="fixed inset-0 pointer-events-none -z-20 overflow-hidden">
+        <AnimatePresence mode="wait">
+          {theme === 'modern' && (
+            <motion.div key="modern" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 1 }} className="absolute inset-0">
+              <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-violet-900/10 blur-[150px] rounded-full"></div>
+              <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-900/10 blur-[150px] rounded-full"></div>
+              <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "url('https://www.transparenttextures.com/patterns/dark-matter.png')" }}></div>
+            </motion.div>
+          )}
+          {theme === 'neon' && (
+            <motion.div key="neon" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 1 }} className="absolute inset-0">
+              <div className="absolute top-[0%] right-[0%] w-[60%] h-[60%] bg-fuchsia-600/20 blur-[120px] rounded-full mix-blend-screen"></div>
+              <div className="absolute bottom-[0%] left-[0%] w-[60%] h-[60%] bg-cyan-500/20 blur-[120px] rounded-full mix-blend-screen"></div>
+              <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: "linear-gradient(rgba(0, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 255, 255, 0.1) 1px, transparent 1px)", backgroundSize: "40px 40px" }}></div>
+            </motion.div>
+          )}
+          {theme === 'brutalist' && (
+            <motion.div key="brutalist" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 1 }} className="absolute inset-0">
+              <div className="absolute inset-0 bg-[#0e0e0e]" style={{ backgroundImage: "url('https://www.transparenttextures.com/patterns/concrete-wall.png')", opacity: 0.1 }}></div>
+              <div className="absolute top-[10%] left-[10%] w-[80%] h-[1px] bg-white/20"></div>
+              <div className="absolute top-[30%] left-[10%] w-[80%] h-[1px] bg-white/10"></div>
+              <div className="absolute top-[10%] left-[10%] w-[1px] h-[80%] bg-white/20"></div>
+              <div className="absolute top-[10%] right-[10%] w-[1px] h-[80%] bg-white/20"></div>
+            </motion.div>
+          )}
+          {theme === 'minimalist' && (
+            <motion.div key="minimalist" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 1 }} className="absolute inset-0">
+              <div className="absolute inset-0 bg-[#0a0a0a]"></div>
+              <div className="absolute inset-0 opacity-[0.01]" style={{ backgroundImage: "url('https://www.transparenttextures.com/patterns/stardust.png')" }}></div>
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80vw] h-[80vw] border-[1px] border-white/5 rounded-full"></div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* TopNavBar (Shared Component) */}
@@ -860,6 +952,9 @@ export default function App() {
               <div className={`w-2 h-2 rounded-full ${onlineStatus === 'playing' ? 'bg-secondary-fixed' : 'bg-primary animate-pulse'}`}></div>
               <span className="text-slate-500 font-mono text-xs tracking-wider">ROOM</span>
               <span className="text-violet-400 font-bold font-mono px-2">{roomId}</span>
+              {isSpectator && (
+                <span className="bg-surface-container-high border border-outline-variant text-[10px] font-bold px-2 py-0.5 rounded-sm tracking-widest text-on-surface-variant ml-2">SPECTATOR</span>
+              )}
             </>
           ) : (
             <span className="text-slate-500 font-mono text-xs tracking-wider px-2">{mode}</span>
@@ -878,9 +973,11 @@ export default function App() {
               {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-rose-500 text-[10px] w-4 h-4 flex items-center justify-center rounded-full font-bold text-white">{unreadCount}</span>}
             </button>
           )}
-          <button onClick={resetGame} className="text-slate-400 hover:text-cyan-400 transition-colors scale-95 active:scale-90">
-            <span className="material-symbols-outlined">restart_alt</span>
-          </button>
+          {!isSpectator && (
+            <button onClick={resetGame} className="text-slate-400 hover:text-cyan-400 transition-colors scale-95 active:scale-90">
+              <span className="material-symbols-outlined">restart_alt</span>
+            </button>
+          )}
           <button onClick={() => { setShowLeaderboard(true); fetchLeaderboard(); }} className="text-slate-400 hover:text-cyan-400 transition-colors scale-95 active:scale-90">
             <span className="material-symbols-outlined">leaderboard</span>
           </button>
@@ -987,20 +1084,24 @@ export default function App() {
                                   <span className="material-symbols-outlined" data-icon="search">search</span>
                               </div>
                           </div>
-                          <button onClick={() => joinMultiplayerGame(joinCodeInput)} disabled={joinCodeInput.length < 5} className="bg-gradient-to-br from-secondary to-secondary-container text-on-secondary px-8 py-4 rounded-lg font-bold uppercase tracking-widest text-xs hover:shadow-[0_0_25px_rgba(0,238,252,0.3)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 shrink-0">
+                          <button onClick={() => joinMultiplayerGame(joinCodeInput)} disabled={joinCodeInput.length < 5} className="bg-gradient-to-br from-secondary to-secondary-container text-on-secondary px-6 py-4 rounded-lg font-bold uppercase tracking-widest text-xs hover:shadow-[0_0_25px_rgba(0,238,252,0.3)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-1 shrink-0">
                               Join
-                              <span className="material-symbols-outlined text-sm" data-icon="arrow_forward">arrow_forward</span>
+                              <span className="material-symbols-outlined text-[16px]" data-icon="arrow_forward">arrow_forward</span>
+                          </button>
+                          <button onClick={() => joinMultiplayerGame(joinCodeInput, true)} disabled={joinCodeInput.length < 5} className="bg-surface-container-high border border-outline-variant hover:bg-surface-container text-on-surface px-6 py-4 rounded-lg font-bold uppercase tracking-widest text-xs transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-1 shrink-0">
+                              Spectate
+                              <span className="material-symbols-outlined text-[16px]" data-icon="visibility">visibility</span>
                           </button>
                       </div>
                   </div>
 
                   {/* Quick Actions / Navigation */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
-                      <button onClick={() => { setMode('AI'); setOnlineStatus(null); setRoomId(null); }} className="p-4 rounded-lg border border-outline-variant/30 hover:bg-surface-container transition-colors flex justify-center items-center gap-3">
+                      <button onClick={() => { setMode('AI'); setOnlineStatus(null); setRoomId(null); setIsSpectator(false); }} className="p-4 rounded-lg border border-outline-variant/30 hover:bg-surface-container transition-colors flex justify-center items-center gap-3">
                           <span className="material-symbols-outlined text-on-surface-variant" data-icon="sports_esports">sports_esports</span>
                           <span className="text-sm font-medium shrink-0">Practice AI</span>
                       </button>
-                      <button onClick={() => { setMode('2P'); setOnlineStatus(null); setRoomId(null); }} className="p-4 rounded-lg border border-outline-variant/30 hover:bg-surface-container transition-colors flex justify-center items-center gap-3">
+                      <button onClick={() => { setMode('2P'); setOnlineStatus(null); setRoomId(null); setIsSpectator(false); }} className="p-4 rounded-lg border border-outline-variant/30 hover:bg-surface-container transition-colors flex justify-center items-center gap-3">
                           <span className="material-symbols-outlined text-on-surface-variant" data-icon="stadium">stadium</span>
                           <span className="text-sm font-medium shrink-0">Local 2P</span>
                       </button>
@@ -1101,7 +1202,7 @@ export default function App() {
                 { id: 'double', icon: 'dynamic_feed', colorClass: 'text-tertiary', hoverColor: 'hover:border-tertiary/40', label: 'Double', count: currentPowerUps.double, cd: currentCooldowns.double },
               ].map(p => {
                 const isCooldown = p.cd > 0;
-                const isDisabled = p.count === 0 || isCooldown || winner !== undefined || isDraw || (mode === 'AI' && !xIsNext);
+                const isDisabled = p.count === 0 || isCooldown || winner !== undefined || isDraw || (mode === 'AI' && !xIsNext) || isSpectator;
                 return (
                   <button
                     key={p.id}
@@ -1182,8 +1283,8 @@ export default function App() {
                   <button
                     key={i}
                     onClick={() => handleCellClick(i)}
-                    className={`glass-panel aspect-square rounded-xl border border-white/5 hover:bg-white/5 transition-all flex items-center justify-center group overflow-hidden ${
-                      isWinningCell ? 'ring-1 ring-white/50 bg-white/10' : ''
+                    className={`glass-panel aspect-square rounded-xl border hover:bg-white/5 transition-all flex items-center justify-center group overflow-hidden ${
+                      isWinningCell ? 'ring-2 ring-primary border-primary bg-primary/20 shadow-[0_0_25px_rgba(177,161,255,0.6)] z-10 scale-[1.02]' : 'border-white/5'
                     } ${activePowerUp === 'remove' && cell && cell !== 'BLOCK' && cell !== currentPlayer.mark ? 'ring-1 ring-error cursor-crosshair' : ''}`}
                   >
                     <AnimatePresence>
@@ -1226,17 +1327,28 @@ export default function App() {
           <div className="flex items-center justify-center gap-6">
             <button 
               onClick={() => jumpTo(Math.max(0, stepNumber - (mode === 'AI' ? 2 : 1)))} 
-              disabled={stepNumber === 0 || !!winner || isDraw} 
+              disabled={stepNumber === 0 || !!winner || isDraw || isSpectator} 
               className="px-8 py-3 rounded-full border border-outline-variant hover:bg-white/5 text-sm font-bold tracking-widest uppercase transition-all active:scale-95 disabled:opacity-30"
             >
               Undo
             </button>
-            <button 
-              onClick={resetGame} 
-              className="px-10 py-3 rounded-full bg-gradient-to-br from-primary to-primary-dim text-on-primary-fixed text-sm font-bold tracking-widest uppercase shadow-[0_0_20px_rgba(177,161,255,0.3)] hover:shadow-[0_0_40px_rgba(177,161,255,0.5)] transition-all active:scale-95"
-            >
-              Play Again
-            </button>
+            {(winner || isDraw) && !isSpectator ? (
+              <button 
+                onClick={resetGame} 
+                className="px-10 py-3 rounded-full bg-gradient-to-br from-green-400 to-emerald-600 text-white text-sm font-bold tracking-widest uppercase shadow-[0_0_20px_rgba(52,211,153,0.3)] hover:shadow-[0_0_40px_rgba(52,211,153,0.5)] transition-all active:scale-95 flex items-center gap-2"
+              >
+                <RotateCcw className="w-5 h-5" /> Rematch
+              </button>
+            ) : (
+              !isSpectator && (
+                <button 
+                  onClick={resetGame} 
+                  className="px-10 py-3 rounded-full bg-gradient-to-br from-primary to-primary-dim text-on-primary-fixed text-sm font-bold tracking-widest uppercase shadow-[0_0_20px_rgba(177,161,255,0.3)] hover:shadow-[0_0_40px_rgba(177,161,255,0.5)] transition-all active:scale-95"
+                >
+                  Restart
+                </button>
+              )
+            )}
           </div>
 
           {/* Time Travel Bar */}
@@ -1287,8 +1399,11 @@ export default function App() {
                     <h1 className="text-4xl md:text-5xl font-headline font-bold tracking-tighter bg-gradient-to-r from-on-surface to-on-surface-variant bg-clip-text text-transparent">Arena Settings</h1>
                   </div>
                   <div className="flex items-center gap-4">
+                    <button onClick={() => { setShowSettings(false); setShowProfile(true); fetchUserStats(user?.uid || ''); }} className="bg-surface-container-high text-primary px-6 py-3 rounded-full text-sm font-bold border border-primary/20 hover:border-primary/50 transition-colors duration-300 tracking-widest uppercase flex items-center gap-2">
+                       <UserIcon className="w-4 h-4" /> Profile & Stats
+                    </button>
                     <button onClick={() => {
-                        setTheme('modern'); setGridSize(3); setWinLength(3); setMode('AI'); setDifficulty('MEDIUM'); setIsTimerMode(false);
+                        setTheme('modern'); setGridSize(3); setWinLength(3); setMode('AI'); setDifficulty('MEDIUM'); setIsTimerMode(false); setIsSpectator(false); setRoomId(null); setOnlineStatus(null);
                       }} className="bg-surface-container-high text-on-surface-variant px-6 py-3 rounded-full text-sm font-bold hover:bg-surface-bright transition-colors duration-300 tracking-widest uppercase">
                       Reset
                     </button>
@@ -1304,7 +1419,7 @@ export default function App() {
                   <div className="md:col-span-7 bg-surface-container-low rounded-3xl p-6 md:p-8 border border-white/5 space-y-8 flex flex-col relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-6 flex gap-2 z-10">
                        <button onClick={() => setPlayer1({...player1})} className="text-xs font-mono px-3 py-1 bg-primary/20 text-primary rounded-full border border-primary/30">P1</button>
-                       {mode === '2P' && <button onClick={() => setPlayer2({...player2})} className="text-xs font-mono px-3 py-1 bg-white/5 text-gray-400 hover:bg-white/10 rounded-full border border-white/10 transition-colors">P2 Config Below</button>}
+                       <button className="text-xs font-mono px-3 py-1 bg-white/5 text-gray-400 hover:bg-white/10 rounded-full border border-white/10 transition-colors">P2 Config Below</button>
                     </div>
 
                     <div>
@@ -1356,7 +1471,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {mode === '2P' && (
+                    <div>
                       <div className="pt-6 border-t border-white/5">
                         <h3 className="font-headline text-xl font-bold mb-6 flex items-center gap-2">
                           <span className="material-symbols-outlined text-secondary">person_edit</span>
@@ -1405,7 +1520,7 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                    )}
+                    </div>
                   </div>
 
                   {/* Right Column Stack */}
@@ -1484,6 +1599,41 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Audio Settings */}
+                  <div className="md:col-span-12 bg-surface-container-low rounded-3xl p-6 md:p-8 border border-white/5">
+                    <h3 className="font-headline text-xl font-bold mb-6 flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary">headphones</span>
+                      Audio Settings
+                    </h3>
+                    <div className="flex flex-col md:flex-row gap-6">
+                      <label className="flex items-center gap-4 cursor-pointer group bg-surface-container hover:bg-surface-container-highest p-4 rounded-2xl transition-colors border border-white/5 flex-1">
+                        <div>
+                          <span className="text-sm font-bold block mb-1">Sound Effects</span>
+                          <span className="text-[10px] text-on-surface-variant font-mono uppercase tracking-widest">In-game actions</span>
+                        </div>
+                        <div className="ml-auto">
+                          <div className={`w-12 h-6 rounded-full relative p-1 transition-colors ${!isSoundMuted ? 'bg-primary shadow-[0_0_15px_rgba(177,161,255,0.4)]' : 'bg-surface-container-highest'}`}>
+                            <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${!isSoundMuted ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                          </div>
+                          <input type="checkbox" checked={!isSoundMuted} onChange={(e) => setIsSoundMuted(!e.target.checked)} className="hidden" />
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-4 cursor-pointer group bg-surface-container hover:bg-surface-container-highest p-4 rounded-2xl transition-colors border border-white/5 flex-1">
+                        <div>
+                          <span className="text-sm font-bold block mb-1">Background Music</span>
+                          <span className="text-[10px] text-on-surface-variant font-mono uppercase tracking-widest">Electronic Ambient</span>
+                        </div>
+                        <div className="ml-auto">
+                          <div className={`w-12 h-6 rounded-full relative p-1 transition-colors ${isMusicPlaying ? 'bg-secondary shadow-[0_0_15px_rgba(0,238,252,0.4)]' : 'bg-surface-container-highest'}`}>
+                            <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${isMusicPlaying ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                          </div>
+                          <input type="checkbox" checked={isMusicPlaying} onChange={(e) => setIsMusicPlaying(e.target.checked)} className="hidden" />
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
                   {/* Atmospheric Styles (Theme Switcher) */}
                   <div className="md:col-span-12 bg-surface-container-low rounded-3xl p-6 md:p-8 border border-white/5">
                     <h3 className="font-headline text-xl font-bold mb-6 flex items-center gap-2">
@@ -1515,21 +1665,21 @@ export default function App() {
                        Execution Mode
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <button onClick={() => setMode('AI')} className={`p-6 rounded-2xl text-left transition-all flex items-start gap-4 ${mode === 'AI' ? 'bg-primary/10 border border-primary/50 shadow-[0_0_20px_rgba(177,161,255,0.15)] ring-1 ring-primary/30' : 'bg-surface-container border border-white/5 hover:border-primary/40'}`}>
+                      <button onClick={() => { setMode('AI'); setOnlineStatus(null); setRoomId(null); setIsSpectator(false); }} className={`p-6 rounded-2xl text-left transition-all flex items-start gap-4 ${mode === 'AI' ? 'bg-primary/10 border border-primary/50 shadow-[0_0_20px_rgba(177,161,255,0.15)] ring-1 ring-primary/30' : 'bg-surface-container border border-white/5 hover:border-primary/40'}`}>
                         <span className={`material-symbols-outlined text-3xl ${mode === 'AI' ? 'text-primary' : 'text-on-surface-variant'}`}>robot_2</span>
                         <div>
                           <div className={`font-bold tracking-wide ${mode === 'AI' ? 'text-primary' : 'text-white'}`}>Neural Link</div>
                           <div className={`text-xs mt-1 ${mode === 'AI' ? 'text-primary-container' : 'text-on-surface-variant'}`}>Challenge the Arena AI</div>
                         </div>
                       </button>
-                      <button onClick={() => setMode('2P')} className={`p-6 rounded-2xl text-left transition-all flex items-start gap-4 ${mode === '2P' ? 'bg-secondary/10 border border-secondary/50 shadow-[0_0_20px_rgba(0,238,252,0.15)] ring-1 ring-secondary/30' : 'bg-surface-container border border-white/5 hover:border-secondary/40'}`}>
+                      <button onClick={() => { setMode('2P'); setOnlineStatus(null); setRoomId(null); setIsSpectator(false); }} className={`p-6 rounded-2xl text-left transition-all flex items-start gap-4 ${mode === '2P' ? 'bg-secondary/10 border border-secondary/50 shadow-[0_0_20px_rgba(0,238,252,0.15)] ring-1 ring-secondary/30' : 'bg-surface-container border border-white/5 hover:border-secondary/40'}`}>
                         <span className={`material-symbols-outlined text-3xl ${mode === '2P' ? 'text-secondary' : 'text-on-surface-variant'}`}>group</span>
                         <div>
                           <div className={`font-bold tracking-wide ${mode === '2P' ? 'text-secondary' : 'text-white'}`}>Local Fusion</div>
                           <div className={`text-xs mt-1 ${mode === '2P' ? 'text-secondary-container' : 'text-on-surface-variant'}`}>Play with a friend locally</div>
                         </div>
                       </button>
-                      <button onClick={() => setMode('ONLINE')} className={`p-6 rounded-2xl text-left transition-all flex items-start gap-4 ${mode === 'ONLINE' ? 'bg-tertiary/10 border border-tertiary/50 shadow-[0_0_20px_rgba(255,154,195,0.15)] ring-1 ring-tertiary/30' : 'bg-surface-container border border-white/5 hover:border-tertiary/40'}`}>
+                      <button onClick={() => { setMode('ONLINE'); setOnlineStatus(null); setRoomId(null); setIsSpectator(false); }} className={`p-6 rounded-2xl text-left transition-all flex items-start gap-4 ${mode === 'ONLINE' ? 'bg-tertiary/10 border border-tertiary/50 shadow-[0_0_20px_rgba(255,154,195,0.15)] ring-1 ring-tertiary/30' : 'bg-surface-container border border-white/5 hover:border-tertiary/40'}`}>
                         <span className={`material-symbols-outlined text-3xl ${mode === 'ONLINE' ? 'text-tertiary' : 'text-on-surface-variant'}`}>language</span>
                         <div>
                           <div className={`font-bold tracking-wide ${mode === 'ONLINE' ? 'text-tertiary' : 'text-white'}`}>Global Net</div>
@@ -1630,31 +1780,48 @@ export default function App() {
                   {/* Stats Dashboard Bento Grid */}
                   <section>
                     <h2 className="font-headline text-xs uppercase tracking-[0.2em] text-on-surface-variant font-semibold mb-4">Performance Stats</h2>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      {/* Stat Card 1 */}
-                      <div className="bg-surface-container-low p-6 rounded-lg border border-outline-variant/5 flex flex-col justify-between h-32 relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-2 opacity-5 group-hover:opacity-10 transition-opacity">
-                          <span className="material-symbols-outlined text-6xl">emoji_events</span>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {/* Overall Ratio */}
+                      <div className="bg-surface-container-low p-4 rounded-lg border border-outline-variant/5 flex flex-col justify-between relative overflow-hidden group">
+                        <span className="font-headline text-[10px] text-on-surface-variant uppercase tracking-widest">W / L / D</span>
+                        <div className="font-mono text-xl text-primary font-bold mt-2">
+                          {userStats.wins} <span className="text-on-surface-variant text-sm">/</span> {userStats.losses} <span className="text-on-surface-variant text-sm">/</span> {userStats.draws}
                         </div>
-                        <span className="font-headline text-[10px] text-on-surface-variant uppercase tracking-widest">Total Wins</span>
-                        <span className="font-mono text-4xl text-primary font-bold">{userStats.wins}</span>
                       </div>
-                      {/* Stat Card 2 */}
-                      <div className="bg-surface-container-low p-6 rounded-lg border border-outline-variant/5 flex flex-col justify-between h-32 relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-2 opacity-5 group-hover:opacity-10 transition-opacity">
-                          <span className="material-symbols-outlined text-6xl">sports_esports</span>
+                      
+                      {/* Longest Streak */}
+                      <div className="bg-surface-container-low p-4 rounded-lg border border-outline-variant/5 flex flex-col justify-between relative overflow-hidden group">
+                        <span className="font-headline text-[10px] text-on-surface-variant uppercase tracking-widest">Longest Streak</span>
+                        <div className="font-mono text-xl text-amber-400 font-bold mt-2 flex items-center gap-1">
+                          <Flame className="w-4 h-4" /> {userStats.longestStreak}
                         </div>
-                        <span className="font-headline text-[10px] text-on-surface-variant uppercase tracking-widest">Total Games</span>
-                        <span className="font-mono text-4xl text-on-surface font-bold">{userStats.total}</span>
                       </div>
-                      {/* Stat Card 3 (Featured) */}
-                      <div className="col-span-2 md:col-span-1 bg-gradient-to-br from-secondary-container/20 to-surface-container-low p-6 rounded-lg border border-secondary-container/10 flex flex-col justify-between h-32 relative overflow-hidden group">
-                        <div className="absolute -bottom-4 -right-4 w-20 h-20 bg-secondary/10 blur-2xl rounded-full"></div>
+
+                      {/* Win Rate */}
+                      <div className="col-span-2 bg-gradient-to-br from-secondary-container/20 to-surface-container-low p-4 rounded-lg border border-secondary-container/10 flex flex-col justify-between relative overflow-hidden group">
                         <span className="font-headline text-[10px] text-secondary uppercase tracking-widest font-bold">Win Rate</span>
-                        <div className="flex items-baseline gap-1">
-                          <span className="font-mono text-4xl text-secondary font-bold">{userStats.total > 0 ? Math.round((userStats.wins / userStats.total) * 100) : 0}</span>
-                          <span className="font-mono text-xl text-secondary/60">%</span>
+                        <div className="flex items-baseline gap-1 mt-2">
+                          <span className="font-mono text-3xl text-secondary font-bold">{userStats.total > 0 ? Math.round((userStats.wins / userStats.total) * 100) : 0}</span>
+                          <span className="font-mono text-lg text-secondary/60">%</span>
                         </div>
+                      </div>
+                    </div>
+
+                    <h4 className="font-headline text-[10px] uppercase tracking-widest mt-6 mb-3 text-on-surface-variant">
+                      Average Game Duration
+                    </h4>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="bg-surface-container-low p-3 rounded-lg border border-outline-variant/5 text-center">
+                        <span className="block text-[10px] font-mono text-primary uppercase tracking-widest mb-1">AI</span>
+                        <span className="font-bold text-lg">{Math.round(userStats.avgDurationAI)}s</span>
+                      </div>
+                      <div className="bg-surface-container-low p-3 rounded-lg border border-outline-variant/5 text-center">
+                        <span className="block text-[10px] font-mono text-secondary uppercase tracking-widest mb-1">Local 2P</span>
+                        <span className="font-bold text-lg">{Math.round(userStats.avgDuration2P)}s</span>
+                      </div>
+                      <div className="bg-surface-container-low p-3 rounded-lg border border-outline-variant/5 text-center">
+                        <span className="block text-[10px] font-mono text-tertiary uppercase tracking-widest mb-1">Online</span>
+                        <span className="font-bold text-lg">{Math.round(userStats.avgDurationOnline)}s</span>
                       </div>
                     </div>
                   </section>
@@ -1790,7 +1957,12 @@ export default function App() {
                     const isMe = user && msg.senderId === user.uid;
                     return (
                       <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                        <span className="text-[10px] text-gray-500 font-medium mb-1 px-1">{msg.senderName}</span>
+                        <span className="text-[10px] text-gray-500 font-medium mb-1 px-1">
+                          {msg.senderName}
+                          {msg.isSpectator && (
+                            <span className="ml-2 bg-surface-container-high border border-outline-variant text-[8px] font-bold px-1.5 py-0.5 rounded-sm tracking-widest text-on-surface-variant">SPECTATOR</span>
+                          )}
+                        </span>
                         <div className={`px-4 py-2 rounded-2xl text-sm max-w-[85%] ${isMe ? 'bg-primary/20 text-primary border border-primary/30 rounded-br-sm' : 'bg-white/10 text-white rounded-bl-sm border border-white/5'}`}>
                           {msg.text}
                         </div>

@@ -2,7 +2,8 @@
 
 > A fast-paced, competitive Tic-Tac-Toe experience — battle your friends or challenge the AI in the ultimate XO showdown.
 
-![XO Arena Banner](https://via.placeholder.com/900x300/1a1a2e/ffffff?text=XO+Arena)
+<img width="1326" height="552" alt="Screenshot 2026-04-26 155406" src="https://github.com/user-attachments/assets/4ccef107-1373-40b9-9dfb-3a4af41d0d33" />
+
 
 ---
 

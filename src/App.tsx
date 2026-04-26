@@ -10,7 +10,8 @@ import { initializeApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User, updateProfile } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp, getDocs, query, orderBy, limit, where, doc, setDoc, updateDoc, onSnapshot, getDoc } from 'firebase/firestore';
-import firebaseConfigJson from '../firebase-applet-config.json'
+import firebaseConfigJson from '../firebase-applet-config.json';
+import { MathBattle } from './MathBattle';
 
 // --- Firebase Setup ---
 // In AI Studio, firebase-applet-config.json provides the credentials.
@@ -111,9 +112,12 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>('modern');
   const [gridSize, setGridSize] = useState<number>(3);
   const [winLength, setWinLength] = useState<number>(3);
-  const [mode, setMode] = useState<'2P' | 'AI' | 'ONLINE'>('AI');
+  const [mode, setMode] = useState<'2P' | 'AI' | 'ONLINE' | 'AI_VS_AI'>('AI');
   const [roomId, setRoomId] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
+  const [ai1Config, setAi1Config] = useState({ model: 'Xylo', difficulty: 'MEDIUM' });
+  const [ai2Config, setAi2Config] = useState({ model: 'Nori', difficulty: 'MEDIUM' });
+  const [showMathBattle, setShowMathBattle] = useState(false);
   const [isSpectator, setIsSpectator] = useState(false);
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [onlineStatus, setOnlineStatus] = useState<'waiting' | 'playing' | null>(null);
@@ -382,12 +386,12 @@ export default function App() {
           streakCount: sameHolder ? s.streakCount + 1 : 1
         };
       });
-      if (user && winner === player1.mark) saveWinToLeaderboard();
-      if (user) saveToHistory(winner === player1.mark ? 'Win' : 'Loss');
+      if (user && winner === player1.mark && mode !== 'AI_VS_AI') saveWinToLeaderboard();
+      if (user && mode !== 'AI_VS_AI') saveToHistory(winner === player1.mark ? 'Win' : 'Loss');
     } else if (isDraw) {
       playSound('draw');
       setScores(s => ({ ...s, currentStreakHolder: null, streakCount: 0 }));
-      if (user) saveToHistory('Draw');
+      if (user && mode !== 'AI_VS_AI') saveToHistory('Draw');
     }
   }, [winner, isDraw]);
 
@@ -408,29 +412,60 @@ export default function App() {
   }, [xIsNext, winner, isDraw, isTimerMode]);
 
   useEffect(() => {
-    if (mode === 'AI' && !xIsNext && !winner && !isDraw) {
+    if ((mode === 'AI' && !xIsNext) || mode === 'AI_VS_AI') {
+      if (winner || isDraw) return;
+      
       setIsAiThinking(true);
       setAiProgress(0);
       
       const interval = setInterval(() => {
         setAiProgress(p => Math.min(p + 10, 100));
-      }, 150); // Progress bar updates over 1.5s
+      }, 150);
 
-      const timer = setTimeout(() => {
-        const move = getAiMove(board, player2.mark, player1.mark);
+      const makeAiMove = async () => {
+        let move = -1;
+        if (mode === 'AI_VS_AI') {
+           const config = xIsNext ? ai1Config : ai2Config;
+           const currentMark = xIsNext ? player1.mark : player2.mark;
+           const oppMark = xIsNext ? player2.mark : player1.mark;
+           try {
+              const res = await fetch('/api/ai-move', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                     model: config.model,
+                     board,
+                     mark: currentMark,
+                     opponentMark: oppMark,
+                     difficulty: config.difficulty
+                  })
+              });
+              const data = await res.json();
+              move = data.move;
+           } catch(e) {
+              console.error(e);
+              move = getAiMove(board, currentMark, oppMark, config.difficulty);
+           }
+        } else {
+           move = getAiMove(board, player2.mark, player1.mark, difficulty);
+        }
+        
         if (move !== -1) handleCellClick(move, true);
         setIsAiThinking(false);
-      }, 1500);
+        clearInterval(interval);
+      };
+
+      // Add small delay for local AI to let progress bar show, or directly call API which has wait time
+      setTimeout(makeAiMove, mode === 'AI_VS_AI' ? 100 : 1500);
+
       return () => {
         clearInterval(interval);
-        clearTimeout(timer);
         setIsAiThinking(false);
       }
     }
-  }, [xIsNext, board, winner, isDraw, mode]);
+  }, [xIsNext, board, winner, isDraw, mode, ai1Config, ai2Config]);
 
-  // --- Logic ---
-  const getAiMove = (currentBoard: BoardState, aiMark: string, pMark: string) => {
+  const getAiMove = (currentBoard: BoardState, aiMark: string, pMark: string, diff: string = difficulty) => {
     const available = currentBoard.map((v, i) => v === null ? i : null).filter(v => v !== null) as number[];
     if (available.length === 0) return -1;
 
@@ -440,7 +475,7 @@ export default function App() {
       return checkWinner(b, gridSize, winLength) !== null;
     };
 
-    if (difficulty === 'EASY') {
+    if (diff === 'EASY') {
        if (Math.random() < 0.2) {
            for (let move of available) if (wins(move, aiMark)) return move;
            for (let move of available) if (wins(move, pMark)) return move;
@@ -448,7 +483,7 @@ export default function App() {
        return available[Math.floor(Math.random() * available.length)];
     }
 
-    if (difficulty === 'MEDIUM') {
+    if (diff === 'MEDIUM') {
         if (Math.random() < 0.6) {
            for (let move of available) if (wins(move, aiMark)) return move;
            for (let move of available) if (wins(move, pMark)) return move;
@@ -460,7 +495,7 @@ export default function App() {
         return available[Math.floor(Math.random() * available.length)];
     }
 
-    if (difficulty === 'HARD') {
+    if (diff === 'HARD') {
         const errorChance = 0.05; // 5% chance of suboptimal move
         if (Math.random() < errorChance) {
              return available[Math.floor(Math.random() * available.length)];
@@ -474,7 +509,7 @@ export default function App() {
     for (let move of available) if (wins(move, pMark)) return move;
 
     // 3. Minimax for HARD
-    if (difficulty === 'HARD') {
+    if (diff === 'HARD') {
       const maxDepth = gridSize === 3 ? 9 : 3;
 
       const minimax = (b: BoardState, depth: number, isMaximizing: boolean, alpha: number, beta: number): number => {
@@ -539,7 +574,7 @@ export default function App() {
 
   const handleCellClick = (index: number, isAi = false) => {
     if (isSpectator) return;
-    if (winner || isDraw || (mode === 'AI' && !xIsNext && !isAi)) return;
+    if (winner || isDraw || (mode === 'AI' && !xIsNext && !isAi) || (mode === 'AI_VS_AI' && !isAi)) return;
     if (mode === 'ONLINE') {
       if (onlineStatus !== 'playing') return;
       if (isHost && !xIsNext) return;
@@ -748,9 +783,9 @@ export default function App() {
       await signInWithPopup(auth, provider);
     } catch (e: any) {
       console.error(e);
-      if (e.code === 'auth/popup-closed-by-user') {
+      if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
         // Ignore if user intentionally closed the popup, or it was blocked contextually
-        console.log('Login popup was closed before completion.');
+        console.log('Login popup was closed or cancelled before completion.');
       } else {
         alert(`Login failed: ${e.message}\n\nIf you are viewing this inside the AI Studio preview, you may need to click 'Open App' in the top right to open the app in a new tab for Google Login to work.`);
       }
@@ -897,6 +932,7 @@ export default function App() {
 
   return (
     <div className="text-on-surface font-body min-h-screen selection:bg-primary-container/30 overflow-x-hidden relative pb-28">
+      {showMathBattle && <MathBattle onClose={() => setShowMathBattle(false)} />}
       {/* Background Music Player */}
       <audio
         id="bg-music"
@@ -1131,7 +1167,9 @@ export default function App() {
             <div className="flex justify-between items-start mb-4">
               <div>
                 <p className="text-on-surface-variant text-[10px] uppercase tracking-widest font-bold mb-1">Current Turn</p>
-                <h2 className={`text-2xl font-headline font-bold transition-opacity ${isAiThinking ? 'opacity-50' : ''}`} style={{ color: currentPlayer.color, textShadow: `0 0 15px ${currentPlayer.color}80` }}>{currentPlayer.name}</h2>
+                <h2 className={`text-2xl font-headline font-bold transition-opacity ${isAiThinking ? 'opacity-50' : ''}`} style={{ color: currentPlayer.color, textShadow: `0 0 15px ${currentPlayer.color}80` }}>
+                   {mode === 'AI_VS_AI' ? (xIsNext ? ai1Config.model : ai2Config.model) : (mode === 'AI' && !xIsNext ? 'AI' : currentPlayer.name)}
+                </h2>
               </div>
               <div className="bg-surface-container-high px-3 py-1 rounded-full flex items-center gap-2">
                 {isAiThinking ? (
@@ -1142,7 +1180,7 @@ export default function App() {
                 ) : (
                   <>
                     <span className="w-2 h-2 rounded-full bg-primary-fixed animate-pulse"></span>
-                    <span className="text-[10px] font-mono text-primary">Your turn</span>
+                    <span className="text-[10px] font-mono text-primary">{mode === 'AI_VS_AI' ? 'Waiting...' : 'Your turn'}</span>
                   </>
                 )}
               </div>
@@ -1175,7 +1213,7 @@ export default function App() {
           {/* Score Panel */}
           <div className="glass-panel p-6 rounded-lg border-t border-white/5 flex items-center justify-between">
             <div className="text-center w-24">
-              <p className="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold truncate">{player1.name}</p>
+              <p className="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold truncate">{mode === 'AI_VS_AI' ? ai1Config.model : player1.name}</p>
               <p className="text-3xl font-headline font-bold text-white">{scores.p1}</p>
             </div>
             <div className="flex flex-col items-center gap-1">
@@ -1187,7 +1225,7 @@ export default function App() {
               <span className="text-xs font-mono text-on-surface-variant">VS</span>
             </div>
             <div className="text-center w-24">
-              <p className="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold truncate">{player2.name}</p>
+              <p className="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold truncate">{mode === 'AI_VS_AI' ? ai2Config.model : mode === 'AI' ? 'AI' : player2.name}</p>
               <p className="text-3xl font-headline font-bold text-white">{scores.p2}</p>
             </div>
           </div>
@@ -1334,8 +1372,8 @@ export default function App() {
               <motion.div initial={{ opacity: 0, y: -20, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -20, scale: 0.9 }} className="w-full max-w-[500px]">
                 <div className={`glass-panel text-center py-4 rounded-2xl border flex items-center justify-center gap-3 ${winner ? 'border-primary shadow-[0_0_20px_rgba(var(--color-primary),0.2)]' : 'border-outline-variant'}`}>
                   {winner && <Trophy className="w-6 h-6 text-primary" />}
-                  <span className="text-2xl font-headline font-bold text-white">
-                    {winner ? (winner === player1.mark ? `${player1.name} WINS!` : `${player2.name} WINS!`) : 'DRAW!'}
+                  <span className="text-2xl font-headline font-bold text-white uppercase tracking-wider">
+                    {winner ? (winner === player1.mark ? `${mode==='AI_VS_AI' ? ai1Config.model : player1.name} WINS!` : `${mode==='AI_VS_AI' ? ai2Config.model : mode==='AI' ? 'AI' : player2.name} WINS!`) : 'DRAW!'}
                   </span>
                   {winner && <Trophy className="w-6 h-6 text-primary" />}
                 </div>
@@ -1579,7 +1617,7 @@ export default function App() {
                     {/* AI Difficulty */}
                     <AnimatePresence>
                       {mode === 'AI' && (
-                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="bg-surface-container-low rounded-3xl p-6 border border-white/5">
+                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="bg-surface-container-low rounded-3xl p-6 border border-white/5 mt-6">
                           <h3 className="font-headline text-xl font-bold mb-6 flex items-center gap-2">
                             <span className="material-symbols-outlined text-primary-fixed">psychology</span>
                             AI Core Logic
@@ -1599,6 +1637,70 @@ export default function App() {
                               <span className="text-xl font-mono text-primary font-bold">Lvl. {difficulty === 'EASY' ? '01' : difficulty === 'MEDIUM' ? '05' : '10'}</span>
                               <p className="text-[10px] text-on-surface-variant mt-1 uppercase tracking-widest">{difficulty === 'HARD' ? 'Adaptive Strategy Active' : 'Standard Routine'}</p>
                             </div>
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {mode === 'AI_VS_AI' && (
+                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="bg-surface-container-low rounded-3xl p-6 border border-white/5 mt-6 col-span-12">
+                          <h3 className="font-headline text-xl font-bold mb-6 flex items-center gap-2">
+                            <span className="material-symbols-outlined text-amber-500">smart_toy</span>
+                            Auto Battler Configuration
+                          </h3>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            {/* P1 AI */}
+                            <div className="space-y-6 bg-surface-container-high/30 p-6 rounded-2xl border border-white/5">
+                               <h4 className="font-mono text-sm tracking-widest text-primary font-bold flex justify-between items-center">
+                                  PLAYER 1
+                                  <div className="flex gap-2">
+                                     <button onClick={() => { setAi1Config({...ai1Config, model: 'Xylo'}); setShowMathBattle(true); }} className={`px-2 py-1 rounded text-[10px] uppercase font-bold tracking-widest ${ai1Config.model === 'Xylo' ? 'bg-cyan-500 text-black shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'bg-surface-container text-on-surface-variant hover:text-white'}`}>Xylo</button>
+                                     <button onClick={() => { setAi1Config({...ai1Config, model: 'Nori'}); setShowMathBattle(true); }} className={`px-2 py-1 rounded text-[10px] uppercase font-bold tracking-widest ${ai1Config.model === 'Nori' ? 'bg-cyan-500 text-black shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'bg-surface-container text-on-surface-variant hover:text-white'}`}>Nori</button>
+                                  </div>
+                               </h4>
+                               <div>
+                                  <div className="flex justify-between font-mono text-[10px] uppercase text-on-surface-variant tracking-wider mb-2">
+                                    <span className={ai1Config.difficulty === 'EASY' ? 'text-white font-bold' : ''}>Easy</span>
+                                    <span className={ai1Config.difficulty === 'MEDIUM' ? 'text-white font-bold' : ''}>Medium</span>
+                                    <span className={ai1Config.difficulty === 'HARD' ? 'text-white font-bold' : ''}>Hard</span>
+                                  </div>
+                                  <div className="grid grid-cols-3 gap-2">
+                                    {['EASY', 'MEDIUM', 'HARD'].map((d) => (
+                                      <button key={d} onClick={() => setAi1Config({...ai1Config, difficulty: d})} className={`h-2 rounded-full transition-all ${ai1Config.difficulty === d ? 'bg-primary scale-y-150' : 'bg-surface-container hover:bg-surface-container-high'}`}></button>
+                                    ))}
+                                  </div>
+                               </div>
+                            </div>
+                            
+                            {/* P2 AI */}
+                            <div className="space-y-6 bg-surface-container-high/30 p-6 rounded-2xl border border-white/5">
+                               <h4 className="font-mono text-sm tracking-widest text-secondary font-bold flex justify-between items-center">
+                                  PLAYER 2
+                                  <div className="flex gap-2">
+                                     <button onClick={() => { setAi2Config({...ai2Config, model: 'Xylo'}); setShowMathBattle(true); }} className={`px-2 py-1 rounded text-[10px] uppercase font-bold tracking-widest ${ai2Config.model === 'Xylo' ? 'bg-fuchsia-500 text-black shadow-[0_0_10px_rgba(217,70,239,0.5)]' : 'bg-surface-container text-on-surface-variant hover:text-white'}`}>Xylo</button>
+                                     <button onClick={() => { setAi2Config({...ai2Config, model: 'Nori'}); setShowMathBattle(true); }} className={`px-2 py-1 rounded text-[10px] uppercase font-bold tracking-widest ${ai2Config.model === 'Nori' ? 'bg-fuchsia-500 text-black shadow-[0_0_10px_rgba(217,70,239,0.5)]' : 'bg-surface-container text-on-surface-variant hover:text-white'}`}>Nori</button>
+                                  </div>
+                               </h4>
+                               <div>
+                                  <div className="flex justify-between font-mono text-[10px] uppercase text-on-surface-variant tracking-wider mb-2">
+                                    <span className={ai2Config.difficulty === 'EASY' ? 'text-white font-bold' : ''}>Easy</span>
+                                    <span className={ai2Config.difficulty === 'MEDIUM' ? 'text-white font-bold' : ''}>Medium</span>
+                                    <span className={ai2Config.difficulty === 'HARD' ? 'text-white font-bold' : ''}>Hard</span>
+                                  </div>
+                                  <div className="grid grid-cols-3 gap-2">
+                                    {['EASY', 'MEDIUM', 'HARD'].map((d) => (
+                                      <button key={d} onClick={() => setAi2Config({...ai2Config, difficulty: d})} className={`h-2 rounded-full transition-all ${ai2Config.difficulty === d ? 'bg-secondary scale-y-150' : 'bg-surface-container hover:bg-surface-container-high'}`}></button>
+                                    ))}
+                                  </div>
+                               </div>
+                            </div>
+                          </div>
+                          
+                          <div className="mt-8 flex justify-center">
+                             <button onClick={() => setShowMathBattle(true)} className="px-8 py-4 bg-amber-500 hover:bg-amber-400 text-black font-bold font-mono tracking-widest uppercase flex items-center justify-center gap-3 transition-transform hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(245,158,11,0.3)]">
+                                <Trophy className="w-5 h-5" />
+                                Start AI Battle
+                             </button>
                           </div>
                         </motion.div>
                       )}
@@ -1684,12 +1786,19 @@ export default function App() {
                        <span className="material-symbols-outlined text-secondary">power</span>
                        Execution Mode
                     </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                       <button onClick={() => { setMode('AI'); setOnlineStatus(null); setRoomId(null); setIsSpectator(false); }} className={`p-6 rounded-2xl text-left transition-all flex items-start gap-4 ${mode === 'AI' ? 'bg-primary/10 border border-primary/50 shadow-[0_0_20px_rgba(177,161,255,0.15)] ring-1 ring-primary/30' : 'bg-surface-container border border-white/5 hover:border-primary/40'}`}>
                         <span className={`material-symbols-outlined text-3xl ${mode === 'AI' ? 'text-primary' : 'text-on-surface-variant'}`}>robot_2</span>
                         <div>
                           <div className={`font-bold tracking-wide ${mode === 'AI' ? 'text-primary' : 'text-white'}`}>Neural Link</div>
                           <div className={`text-xs mt-1 ${mode === 'AI' ? 'text-primary-container' : 'text-on-surface-variant'}`}>Challenge the Arena AI</div>
+                        </div>
+                      </button>
+                      <button onClick={() => { setMode('AI_VS_AI'); setOnlineStatus(null); setRoomId(null); setIsSpectator(false); }} className={`p-6 rounded-2xl text-left transition-all flex items-start gap-4 ${mode === 'AI_VS_AI' ? 'bg-amber-500/10 border border-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/30' : 'bg-surface-container border border-white/5 hover:border-amber-500/40'}`}>
+                        <span className={`material-symbols-outlined text-3xl ${mode === 'AI_VS_AI' ? 'text-amber-500' : 'text-on-surface-variant'}`}>smart_toy</span>
+                        <div>
+                          <div className={`font-bold tracking-wide ${mode === 'AI_VS_AI' ? 'text-amber-500' : 'text-white'}`}>Auto Battler</div>
+                          <div className={`text-xs mt-1 ${mode === 'AI_VS_AI' ? 'text-amber-200' : 'text-on-surface-variant'}`}>AI vs AI Showdown</div>
                         </div>
                       </button>
                       <button onClick={() => { setMode('2P'); setOnlineStatus(null); setRoomId(null); setIsSpectator(false); }} className={`p-6 rounded-2xl text-left transition-all flex items-start gap-4 ${mode === '2P' ? 'bg-secondary/10 border border-secondary/50 shadow-[0_0_20px_rgba(0,238,252,0.15)] ring-1 ring-secondary/30' : 'bg-surface-container border border-white/5 hover:border-secondary/40'}`}>

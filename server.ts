@@ -4,6 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 import path from "path";
 import * as dotenv from "dotenv";
+import rateLimit from "express-rate-limit";
 
 dotenv.config();
 
@@ -13,11 +14,18 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Rate limiting middleware for API endpoints
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: "Too many requests from this IP, please try again later"
+  });
+
   // API Routes
-  app.post("/api/math-solve", async (req, res) => {
+  app.post("/api/math-solve", apiLimiter, async (req, res) => {
     try {
       const { model, problem, difficulty } = req.body;
-      const prompt = `Solve this math problem and return ONLY the final numerical answer as a JSON object: { "answer": <number> }. Problem: ${problem}. You are operating at ${difficulty} difficulty. If EASY, you might occasionally make a small math error (-1 or +1). If HARD, answer perfectly and quickly.`;
+      const prompt = `Solve this math problem and return ONLY the final numerical answer as a JSON object: { "answer": <number> }. Problem: ${problem}. You are operating at ${difficulty} difficult[...]
 
       let answer = null;
       if (model === "Xylo") {
@@ -52,12 +60,12 @@ async function startServer() {
     }
   });
 
-  app.post("/api/ai-move", async (req, res) => {
+  app.post("/api/ai-move", apiLimiter, async (req, res) => {
     try {
       const { model, board, mark, opponentMark, difficulty } = req.body;
       let move = -1;
       
-      console.log("Gemini API key present?", !!process.env.GEMINI_API_KEY, process.env.GEMINI_API_KEY?.substring(0,6));
+      console.log("AI move generation started");
       
       let strategyData = "";
       try {
